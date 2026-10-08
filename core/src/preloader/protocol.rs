@@ -404,6 +404,58 @@ impl<'a, P: MtkPort> PlProtocol<'a, P> {
         Ok(())
     }
 
+    pub fn send_image(&mut self, name: &str, data: &[u8]) -> Result<()> {
+        debug!("SendImage: {name}, size: {}", data.len());
+
+        self.echo(&[Command::SendImage as u8], 1)?;
+
+        let mut name_bytes = [0u8; 64];
+        name_bytes[..name.len()].copy_from_slice(name.as_bytes());
+
+        self.write(&name_bytes)?;
+        self.write_u32_be(data.len() as u32)?;
+
+        status_ok!(self);
+
+        self.write(data)?;
+
+        let checksum = data.iter().fold(0u32, |acc, &x| acc.wrapping_add(x as u32)) & 0xFFFFFFFF;
+        self.write_u32_be(checksum)?;
+
+        /* Thanks MTK for not adding a status check here */
+
+        Ok(())
+    }
+
+    pub fn boot_image(&mut self, name: &str) -> Result<()> {
+        debug!("BootImage: {name}");
+
+        self.echo(&[Command::BootImage as u8], 1)?;
+
+        let mut name_bytes = [0u8; 64];
+        name_bytes[..name.len()].copy_from_slice(name.as_bytes());
+
+        self.write(&name_bytes)?;
+
+        status_ok!(self);
+
+        debug!("Jumped to image: {name}");
+
+        Ok(())
+    }
+
+    pub fn get_br_ver(&mut self) -> Result<u8> {
+        self.port.write_u8(Command::GetBrVer as u8)?;
+        let br_ver = self.port.read_u8()?;
+        if br_ver != Command::GetBrVer as u8 { Ok(br_ver) } else { Ok(0) }
+    }
+
+    pub fn get_bl_ver(&mut self) -> Result<u8> {
+        self.port.write_u8(Command::GetPlVer as u8)?;
+        let bl_ver = self.port.read_u8()?;
+        if bl_ver != Command::GetPlVer as u8 { Ok(bl_ver) } else { Ok(0) }
+    }
+
     #[cfg(feature = "exploits")]
     pub fn exploit(&mut self) -> Result<bool> {
         use crate::exploit::{ExploitExt, Linecode};

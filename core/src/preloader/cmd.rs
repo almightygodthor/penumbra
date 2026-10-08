@@ -8,6 +8,9 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[allow(dead_code)]
 pub enum Command {
+    SendImage = 0x70,
+    BootImage = 0x71,
+
     StayStill = 0x80,
     SendDebugAuth = 0x88,
 
