@@ -179,6 +179,24 @@ pub trait MtkPort: Send {
     fn reenumerate(&mut self, vid: u16, pid: u16) -> Result<()>;
     fn read_exact(&mut self, buf: &mut [u8]) -> Result<usize>;
     fn write_all(&mut self, buf: &[u8]) -> Result<()>;
+    fn read_u64(&mut self) -> Result<u64> {
+        let mut buf = [0u8; 8];
+        self.read_exact(&mut buf)?;
+        Ok(u64::from_le_bytes(buf))
+    }
+    fn write_u64(&mut self, value: u64) -> Result<()> {
+        let buf = value.to_le_bytes();
+        self.write_all(&buf)
+    }
+    fn read_u64_be(&mut self) -> Result<u64> {
+        let mut buf = [0u8; 8];
+        self.read_exact(&mut buf)?;
+        Ok(u64::from_be_bytes(buf))
+    }
+    fn write_u64_be(&mut self, value: u64) -> Result<()> {
+        let buf = value.to_be_bytes();
+        self.write_all(&buf)
+    }
     fn read_u32(&mut self) -> Result<u32> {
         let mut buf = [0u8; 4];
         self.read_exact(&mut buf)?;
@@ -188,6 +206,15 @@ pub trait MtkPort: Send {
         let buf = value.to_le_bytes();
         self.write_all(&buf)
     }
+    fn read_u32_be(&mut self) -> Result<u32> {
+        let mut buf = [0u8; 4];
+        self.read_exact(&mut buf)?;
+        Ok(u32::from_be_bytes(buf))
+    }
+    fn write_u32_be(&mut self, value: u32) -> Result<()> {
+        let buf = value.to_be_bytes();
+        self.write_all(&buf)
+    }
     fn read_u16(&mut self) -> Result<u16> {
         let mut buf = [0u8; 2];
         self.read_exact(&mut buf)?;
@@ -195,6 +222,15 @@ pub trait MtkPort: Send {
     }
     fn write_u16(&mut self, value: u16) -> Result<()> {
         let buf = value.to_le_bytes();
+        self.write_all(&buf)
+    }
+    fn read_u16_be(&mut self) -> Result<u16> {
+        let mut buf = [0u8; 2];
+        self.read_exact(&mut buf)?;
+        Ok(u16::from_be_bytes(buf))
+    }
+    fn write_u16_be(&mut self, value: u16) -> Result<()> {
+        let buf = value.to_be_bytes();
         self.write_all(&buf)
     }
     fn read_u8(&mut self) -> Result<u8> {
