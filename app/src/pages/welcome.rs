@@ -30,7 +30,7 @@ pub struct WelcomePage {
 impl WelcomePage {
     pub fn new() -> Self {
         let menu = description_menu![
-            ('*', "Enter DA Mode", "Connect to the GT Neo 3:\n1. Power off the device.\n2. Hold Volume Up (+) and Volume Down (-) together.\n3. While holding both, connect it to your PC." => MenuAction::EnterDaMode),
+            ('*', "Enter DA Mode", "Connect to the GT Neo 3:\n1. Power off device.\n2. Hold both volume buttons.\n3. Connect to your PC." => MenuAction::EnterDaMode),
             ('*', "Options", "Configure Antumbra settings." => MenuAction::Options),
             ('*', "Quit", "Exit Antumbra." => MenuAction::Quit),
         ];
