@@ -403,15 +403,24 @@ impl DeviceAction for FlashScatter {
             return Ok(false);
         };
 
-        let selected_set: std::collections::HashSet<&str> =
+        let selected_names: std::collections::HashSet<&str> =
             selected.iter().map(String::as_str).collect();
         let missing: Vec<String> = items
             .iter()
-            .filter(|item| item.downloadable && selected_set.contains(item.name.as_str()) && !item.found)
+            .filter(|item| item.downloadable && selected_names.contains(item.name.as_str()) && !item.found)
             .map(|item| format!("{}: {}", item.name, item.filename))
             .collect();
         if !missing.is_empty() {
             anyhow::bail!("Selected partition image(s) are missing:\n{}", missing.join("\n"));
+        }
+
+        let selected_set: std::collections::HashSet<&str> = items
+            .iter()
+            .filter(|item| item.downloadable && item.found && selected_names.contains(item.name.as_str()))
+            .map(|item| item.name.as_str())
+            .collect();
+        if selected_set.is_empty() {
+            anyhow::bail!("No available partition images selected for flashing.");
         }
 
         let filtered_scatter = filter_scatter_downloads(&scatter_content, &selected_set);
