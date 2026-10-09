@@ -233,18 +233,20 @@ impl DevicePage {
                     self.focused = FocusedPanel::PartitionMenu;
                     self.partition_list.toggled = true;
                     self.partition_list.clear_toggles();
+                    let name_width = items.iter().map(|item| item.name.len()).max().unwrap_or(9).max(9);
+                    let image_width = items.iter().map(|item| item.filename.len()).max().unwrap_or(5).max(5);
                     self.partition_list.items = items
                         .iter()
                         .map(|item| {
-                            let status = if !item.downloadable {
-                                "Not flashable"
+                            let (status, marker) = if !item.downloadable {
+                                ("NOT FLASHABLE", "—")
                             } else if item.found {
-                                "Found"
+                                ("FOUND", "✓")
                             } else {
-                                "Missing"
+                                ("MISSING", "✗")
                             };
                             ListItemEntry::new(
-                                format!("{} | {} | {}", item.name, item.filename, status),
+                                format!("{:<name_width$}  {:<image_width$}  {} {}", item.name, item.filename, marker, status),
                                 Some(item.name.clone()),
                                 None,
                             )
@@ -260,9 +262,7 @@ impl DevicePage {
                         }
                     }
                     self.partition_list.state.select(Some(0));
-                    self.header_status = Some(
-                        "Scatter review: Space toggle • Enter confirm • Esc cancel".into(),
-                    );
+                    self.header_status = None;
                 }
 
                 DeviceEvent::NeedFile { title, directories_only, extensions } => {
@@ -411,10 +411,18 @@ impl DevicePage {
                 self.focused = FocusedPanel::PartitionMenu;
                 self.partition_list.toggled = true;
                 self.partition_list.clear_toggles();
+                let name_width = items.iter().map(|item| item.name.len()).max().unwrap_or(9).max(9);
+                let image_width = items.iter().map(|item| item.filename.len()).max().unwrap_or(5).max(5);
                 self.partition_list.items = items.iter().map(|item| {
-                    let status = if !item.downloadable { "Not flashable" }
-                        else if item.found { "Found" } else { "Missing" };
-                    ListItemEntry::new(format!("{} | {} | {}", item.name, item.filename, status),
+                    let (status, marker) = if !item.downloadable {
+                        ("NOT FLASHABLE", "—")
+                    } else if item.found {
+                        ("FOUND", "✓")
+                    } else {
+                        ("MISSING", "✗")
+                    };
+                    ListItemEntry::new(
+                        format!("{:<name_width$}  {:<image_width$}  {} {}", item.name, item.filename, marker, status),
                         Some(item.name.clone()), None)
                 }).collect();
                 for (index, item) in items.iter().enumerate() {
@@ -424,7 +432,7 @@ impl DevicePage {
                     }
                 }
                 self.partition_list.state.select(Some(0));
-                self.header_status = Some("Scatter review: Space toggle • Enter confirm • Esc cancel".into());
+                self.header_status = None;
             }
             Ok(_) => { error_dialog!(ctx, "No partitions were found in the selected scatter file."); }
             Err(e) => { error_dialog!(ctx, format!("Unable to read scatter file: {e}")); }
