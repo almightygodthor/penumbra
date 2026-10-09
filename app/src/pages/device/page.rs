@@ -373,8 +373,9 @@ impl DevicePage {
                     return;
                 }
 
-                // Scatter image review is a local preflight and does not require a device.
-                if idx + 1 == total_actions {
+                // Scatter image review is the only local action; find it by
+                // label so adding actions after it cannot route them to the picker.
+                if actions().get(idx).is_some_and(|action| action.label() == "Flash from scatter file") {
                     self.open_scatter_picker(ctx);
                     return;
                 }
