@@ -19,35 +19,24 @@ pub const ERROR_SYMBOL: &str = "❂";
 pub fn init_logger(tui_mode: bool, verbose: bool) {
     let mut builder = env_logger::Builder::new();
 
-    let log_file: Option<Arc<Mutex<File>>> = if verbose {
-        match File::create(LOG_FILE_PATH) {
+    // Keep a persistent diagnostic log for both TUI and CLI sessions.
+    // Append instead of truncating so previous flashing attempts remain available.
+    let log_file: Option<Arc<Mutex<File>>> =
+        match File::options().create(true).append(true).open(LOG_FILE_PATH) {
             Ok(file) => Some(Arc::new(Mutex::new(file))),
             Err(e) => {
-                eprintln!("Failed to create log file: {}", e);
+                eprintln!("Failed to open log file '{}': {}", LOG_FILE_PATH, e);
                 None
             }
-        }
-    } else {
-        None
-    };
+        };
 
     builder.format(move |buf: &mut Formatter, record: &Record| {
-        if tui_mode {
-            if verbose && let Some(ref log_file) = log_file {
-                let mut file = log_file.lock().unwrap();
-                let level = record.level();
-                writeln!(file, "[{}] {}", level, record.args())?;
-                drop(file);
-            }
+        if let Some(ref log_file) = log_file {
+            let mut file = log_file.lock().unwrap();
+            writeln!(file, "[{}] {}", record.level(), record.args())?;
+        }
 
-            Ok(())
-        } else if record.level() == Level::Debug {
-            if verbose && let Some(ref log_file) = log_file {
-                return {
-                    let mut file = log_file.lock().unwrap();
-                    writeln!(file, "[DEBUG] {}", record.args())
-                };
-            }
+        if tui_mode || record.level() == Level::Debug {
             Ok(())
         } else {
             let prefix = LOGGER_PREIX.bold().purple();
