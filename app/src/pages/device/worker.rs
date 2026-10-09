@@ -52,6 +52,7 @@ pub struct ScatterReviewItem {
 
 pub enum DeviceCommand {
     RunAction(usize),
+    FlashPreparedScatter { scatter: PathBuf, selected_names: Vec<String> },
     PartitionsChosen(Vec<String>),
     FileChosen(PathBuf),
     Cancel,
@@ -245,6 +246,20 @@ fn run_worker(
                     Ok(_) => {}
                 }
 
+                let _ = event_tx.send(DeviceEvent::ActionFinished);
+            }
+            DeviceCommand::FlashPreparedScatter { scatter, selected_names } => {
+                let io = DeviceIo::new(&event_tx, &cmd_rx, &partitions, &activity);
+                let result = super::actions::FlashScatter.run_prepared(&mut dev, &io, &scatter, &selected_names);
+                match result {
+                    Ok(true) => {
+                        dev.devinfo().set_partitions(vec![]);
+                        partitions = dev.partitions();
+                        let _ = event_tx.send(DeviceEvent::PartitionsChanged(partitions.clone()));
+                    }
+                    Ok(false) => {}
+                    Err(e) => { let _ = event_tx.send(DeviceEvent::Error(e.to_string())); }
+                }
                 let _ = event_tx.send(DeviceEvent::ActionFinished);
             }
             DeviceCommand::Shutdown => {

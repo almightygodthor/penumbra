@@ -377,34 +377,20 @@ impl DeviceAction for WriteAllPartitions {
 
 pub struct FlashScatter;
 
-impl DeviceAction for FlashScatter {
-    fn changes_layout(&self) -> bool {
-        true
-    }
-
-    fn label(&self) -> &'static str {
-        "Flash from scatter file"
-    }
-
-    fn run(&self, dev: &mut Device<'_, PortType>, io: &DeviceIo<'_>) -> anyhow::Result<bool> {
-        let Some(scatter) = io.ask_file("Scatter file", false, Some(vec!["txt", "xml"])) else {
-            return Ok(false);
-        };
-
-        let scatter_content = std::fs::read_to_string(&scatter)?;
+impl FlashScatter {
+    pub fn run_prepared(
+        &self,
+        dev: &mut Device<'_, PortType>,
+        io: &DeviceIo<'_>,
+        scatter: &Path,
+        selected: &[String],
+    ) -> anyhow::Result<bool> {
+        let scatter_content = std::fs::read_to_string(scatter)?;
         let scatter_dir = scatter.parent().unwrap_or_else(|| Path::new("")).to_path_buf();
-
         let items = scatter_review_items(&scatter_content, &scatter_dir);
-        if items.is_empty() {
-            anyhow::bail!("No partitions were found in the selected scatter file.");
-        }
-
-        let Some(selected) = io.ask_scatter_selection(items.clone()) else {
-            return Ok(false);
-        };
-
         let selected_names: std::collections::HashSet<&str> =
             selected.iter().map(String::as_str).collect();
+
         let missing: Vec<String> = items
             .iter()
             .filter(|item| item.downloadable && selected_names.contains(item.name.as_str()) && !item.found)
@@ -426,14 +412,12 @@ impl DeviceAction for FlashScatter {
         let filtered_scatter = filter_scatter_downloads(&scatter_content, &selected_set);
         let files = ScatterFiles::new(scatter_dir);
         let readers = files.clone();
-
         let reader_source = move |file_path: &str| readers.reader(file_path);
         let writer_sink = move |file_path: &str| files.writer(file_path);
 
         let mut started = false;
         let event_tx = io.event_tx.clone();
         let activity = io.activity_handle();
-
         let progress_callback = move |curr: u64, total: u64| {
             if !started {
                 let _ = event_tx.send(DeviceEvent::ProgressStart {
@@ -442,7 +426,6 @@ impl DeviceAction for FlashScatter {
                 });
                 started = true;
             }
-
             let _ = event_tx.send(DeviceEvent::ProgressUpdate {
                 written: curr,
                 total: Some(total),
@@ -451,13 +434,33 @@ impl DeviceAction for FlashScatter {
         };
 
         dev.flash_scatter(&filtered_scatter, reader_source, writer_sink, progress_callback)?;
-
         io.progress_finish("Successfully flashed from scatter file!");
-
         Ok(true)
     }
 }
 
+impl DeviceAction for FlashScatter {
+    fn changes_layout(&self) -> bool { true }
+    fn label(&self) -> &'static str { "Flash from scatter file" }
+
+    fn run(&self, dev: &mut Device<'_, PortType>, io: &DeviceIo<'_>) -> anyhow::Result<bool> {
+        let Some(scatter) = io.ask_file("Scatter file", false, Some(vec!["txt", "xml"])) else {
+            return Ok(false);
+        };
+        let items = load_scatter_review(&scatter)?;
+        if items.is_empty() {
+            anyhow::bail!("No partitions were found in the selected scatter file.");
+        }
+        let Some(selected) = io.ask_scatter_selection(items) else { return Ok(false) };
+        self.run_prepared(dev, io, &scatter, &selected)
+    }
+}
+
+pub fn load_scatter_review(scatter: &Path) -> anyhow::Result<Vec<ScatterReviewItem>> {
+    let content = std::fs::read_to_string(scatter)?;
+    let dir = scatter.parent().unwrap_or_else(|| Path::new(""));
+    Ok(scatter_review_items(&content, dir))
+}
 
 fn scatter_tag(block: &str, tag: &str) -> Option<String> {
     let open = format!("<{tag}>");
@@ -485,7 +488,7 @@ fn scatter_display_path(filename: &str, base_dir: &Path) -> PathBuf {
 fn scatter_review_items(content: &str, base_dir: &Path) -> Vec<ScatterReviewItem> {
     let mut items = Vec::new();
     let mut rest = content;
-    while let Some(start) = rest.find("<partition_index>") {
+    while let Some(start) = rest.find("<partition_index") {
         rest = &rest[start..];
         let Some(end_rel) = rest.find("</partition_index>") else { break };
         let block = &rest[..end_rel + "</partition_index>".len()];
@@ -509,7 +512,7 @@ fn scatter_review_items(content: &str, base_dir: &Path) -> Vec<ScatterReviewItem
 fn filter_scatter_downloads(content: &str, selected: &std::collections::HashSet<&str>) -> String {
     let mut output = String::with_capacity(content.len());
     let mut rest = content;
-    while let Some(start) = rest.find("<partition_index>") {
+    while let Some(start) = rest.find("<partition_index") {
         output.push_str(&rest[..start]);
         rest = &rest[start..];
         let Some(end_rel) = rest.find("</partition_index>") else {

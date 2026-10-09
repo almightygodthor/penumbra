@@ -21,8 +21,8 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, Padding, Paragraph, Row, Table, Widget};
 use unicode_width::UnicodeWidthStr;
 
-use super::actions::actions;
-use super::worker::{ConnectParams, DeviceCommand, DeviceEvent, DeviceStatus};
+use super::actions::{actions, load_scatter_review};
+use super::worker::{ConnectParams, DeviceCommand, DeviceEvent, DeviceStatus, ScatterReviewItem};
 use crate::app::{AppCtx, AppPage};
 use crate::components::footer::Footer;
 use crate::components::selectable_list::{
@@ -75,6 +75,11 @@ pub struct DevicePage {
     reconnect: bool,
     busy: bool,
     explorer_dirs_only: bool,
+    scatter_picker: bool,
+    scatter_review_mode: bool,
+    scatter_items: Vec<ScatterReviewItem>,
+    scatter_path: Option<PathBuf>,
+    pending_scatter: Option<(PathBuf, Vec<String>)>,
 }
 
 impl DevicePage {
@@ -126,6 +131,11 @@ impl DevicePage {
             reconnect: true,
             busy: false,
             explorer_dirs_only: false,
+            scatter_picker: false,
+            scatter_review_mode: false,
+            scatter_items: Vec::new(),
+            scatter_path: None,
+            pending_scatter: None,
         }
     }
 
@@ -197,6 +207,11 @@ impl DevicePage {
                 DeviceEvent::Connected { devinfo, partitions } => {
                     self.devinfo = Some(devinfo);
                     self.partition_list.items = Self::partition_items(&partitions);
+                    if let Some((scatter, selected_names)) = self.pending_scatter.take() {
+                        self.header_status = Some("Device connected; starting scatter flash...".into());
+                        self.busy = true;
+                        self.send(DeviceCommand::FlashPreparedScatter { scatter, selected_names });
+                    }
                 }
 
                 DeviceEvent::PartitionsChanged(partitions) => {
@@ -303,6 +318,9 @@ impl DevicePage {
                 }
 
                 DeviceEvent::ActionFinished => {
+                    self.scatter_review_mode = false;
+                    self.scatter_items.clear();
+                    self.scatter_path = None;
                     if self.progress_bar.is_active() {
                         self.progress_bar.reset();
                     }
@@ -355,6 +373,12 @@ impl DevicePage {
                     return;
                 }
 
+                // Scatter image review is a local preflight and does not require a device.
+                if idx + 1 == total_actions {
+                    self.open_scatter_picker(ctx);
+                    return;
+                }
+
                 if !matches!(self.status, DeviceStatus::Connected(_)) {
                     error_dialog!(ctx, "Device not connected");
                     return;
@@ -367,7 +391,88 @@ impl DevicePage {
         }
     }
 
+    fn open_scatter_picker(&mut self, ctx: &mut AppCtx) {
+        match FileExplorer::new("Select scatter file") {
+            Ok(explorer) => {
+                self.scatter_picker = true;
+                self.explorer = Some(explorer.extensions(&["txt", "xml"]));
+            }
+            Err(e) => { error_dialog!(ctx, format!("Failed to open file browser: {e}")); }
+        }
+    }
+
+    fn begin_scatter_review(&mut self, ctx: &mut AppCtx, path: PathBuf) {
+        match load_scatter_review(&path) {
+            Ok(items) if !items.is_empty() => {
+                self.saved_partition_items = Some(self.partition_list.items.clone());
+                self.scatter_path = Some(path);
+                self.scatter_items = items.clone();
+                self.scatter_review_mode = true;
+                self.focused = FocusedPanel::PartitionMenu;
+                self.partition_list.toggled = true;
+                self.partition_list.clear_toggles();
+                self.partition_list.items = items.iter().map(|item| {
+                    let status = if !item.downloadable { "Not flashable" }
+                        else if item.found { "Found" } else { "Missing" };
+                    ListItemEntry::new(format!("{} | {} | {}", item.name, item.filename, status),
+                        Some(item.name.clone()), None)
+                }).collect();
+                for (index, item) in items.iter().enumerate() {
+                    if item.downloadable && item.found {
+                        self.partition_list.state.select(Some(index));
+                        self.partition_list.toggle_selected();
+                    }
+                }
+                self.partition_list.state.select(Some(0));
+                self.header_status = Some("Scatter review: Space toggle • Enter confirm • Esc cancel".into());
+            }
+            Ok(_) => { error_dialog!(ctx, "No partitions were found in the selected scatter file."); }
+            Err(e) => { error_dialog!(ctx, format!("Unable to read scatter file: {e}")); }
+        }
+    }
+
     fn handle_partition_input(&mut self, ctx: &mut AppCtx, key: KeyEvent) {
+        if self.scatter_review_mode {
+            if self.partition_list.handle_key(key, ctx) { return; }
+            match key.code {
+                KeyCode::Esc => {
+                    self.scatter_review_mode = false;
+                    self.scatter_items.clear();
+                    self.scatter_path = None;
+                    self.partition_list.toggled = false;
+                    self.partition_list.clear_toggles();
+                    if let Some(items) = self.saved_partition_items.take() {
+                        self.partition_list.items = items;
+                    }
+                    self.focused = FocusedPanel::Menu;
+                    self.header_status = None;
+                }
+                KeyCode::Enter => {
+                    let selected_names: Vec<String> = self.partition_list.checked_items()
+                        .into_iter().filter_map(|item| item.value.clone()).collect();
+                    if selected_names.is_empty() { return; }
+                    let Some(scatter) = self.scatter_path.take() else { return };
+                    self.scatter_review_mode = false;
+                    self.partition_list.toggled = false;
+                    self.partition_list.clear_toggles();
+                    if let Some(items) = self.saved_partition_items.take() {
+                        self.partition_list.items = items;
+                    }
+                    if matches!(self.status, DeviceStatus::Connected(_)) {
+                        self.busy = true;
+                        self.send(DeviceCommand::FlashPreparedScatter { scatter, selected_names });
+                    } else {
+                        self.pending_scatter = Some((scatter, selected_names));
+                        self.busy = true;
+                        self.header_status = Some("Waiting for device connection to flash selected images...".into());
+                        self.connect(ctx);
+                    }
+                }
+                _ => {}
+            }
+            return;
+        }
+
         if self.partition_list.handle_key(key, ctx) {
             return;
         }
@@ -505,12 +610,19 @@ impl DevicePage {
         self.menu.render(menu_block.inner(menu_area), frame.buffer_mut(), &ctx.theme);
 
         let info_block = Block::default()
-            .title(" Device Info ")
+            .title(if self.scatter_review_mode { " Scatter Image Review " } else { " Device Info " })
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .border_style(ctx.theme.style_border(self.partition_list.is_focused()));
         frame.render_widget(info_block.clone(), info_area);
         let inner = info_block.inner(info_area);
+
+        // Scatter preflight is local-only: show the selected scatter's image list even
+        // while the device is disconnected instead of the normal connection placeholder.
+        if self.scatter_review_mode {
+            self.partition_list.render(inner, frame.buffer_mut(), &ctx.theme);
+            return;
+        }
 
         if !matches!(self.status, DeviceStatus::Connected(_)) {
             let message = Paragraph::new(vec![
@@ -661,11 +773,20 @@ impl Page for DevicePage {
             match explorer.handle_key_event(key) {
                 ExplorerResult::Selected(path) => {
                     self.explorer = None;
-                    self.send(DeviceCommand::FileChosen(path));
+                    if self.scatter_picker {
+                        self.scatter_picker = false;
+                        self.begin_scatter_review(ctx, path);
+                    } else {
+                        self.send(DeviceCommand::FileChosen(path));
+                    }
                 }
                 ExplorerResult::Cancelled => {
                     self.explorer = None;
-                    self.send(DeviceCommand::Cancel);
+                    if self.scatter_picker {
+                        self.scatter_picker = false;
+                    } else {
+                        self.send(DeviceCommand::Cancel);
+                    }
                 }
                 ExplorerResult::Pending => {}
             }
