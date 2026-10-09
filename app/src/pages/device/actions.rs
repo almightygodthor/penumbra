@@ -408,7 +408,7 @@ impl DeviceAction for FlashScatter {
         let missing: Vec<String> = items
             .iter()
             .filter(|item| item.downloadable && selected_names.contains(item.name.as_str()) && !item.found)
-            .map(|item| format!("{}: {}", item.name, item.filename))
+            .map(|item| format!("{}: {}", item.name, scatter_display_path(&item.filename, &scatter_dir)))
             .collect();
         if !missing.is_empty() {
             anyhow::bail!("Selected partition image(s) are missing:\n{}", missing.join("\n"));
@@ -467,6 +467,21 @@ fn scatter_tag(block: &str, tag: &str) -> Option<String> {
     Some(block[start..end].trim().to_string())
 }
 
+fn scatter_display_path(filename: &str, base_dir: &Path) -> PathBuf {
+    if Path::new(filename).is_absolute() {
+        return PathBuf::from(filename);
+    }
+
+    let mut clean = filename.trim_start_matches("./");
+    if let Some(stripped) = clean.strip_prefix("backup/") {
+        clean = stripped.trim_start_matches("./");
+    }
+    if let Some(stripped) = clean.strip_prefix("out/") {
+        clean = stripped.trim_start_matches("./");
+    }
+    base_dir.join(clean)
+}
+
 fn scatter_review_items(content: &str, base_dir: &Path) -> Vec<ScatterReviewItem> {
     let mut items = Vec::new();
     let mut rest = content;
@@ -483,11 +498,7 @@ fn scatter_review_items(content: &str, base_dir: &Path) -> Vec<ScatterReviewItem
         let found = if !downloadable {
             false
         } else {
-            let normalized = filename.trim_start_matches("./");
-            let relative = normalized.strip_prefix("backup/").or_else(|| normalized.strip_prefix("out/")).unwrap_or(normalized);
-            let path = Path::new(relative);
-            let resolved = if path.is_absolute() { path.to_path_buf() } else { base_dir.join(path) };
-            resolved.is_file()
+            scatter_display_path(&filename, base_dir).is_file()
         };
 
         items.push(ScatterReviewItem { name, filename, found, downloadable });
