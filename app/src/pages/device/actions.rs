@@ -9,9 +9,8 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, Sender};
 
 use penumbra::activity::DeviceActivity;
-use penumbra::hacc::LockState;
 use penumbra::port::PortType;
-use penumbra::{Device, Partition, RPMB_FRAME_DATA_SZ, RpmbRegion, Storage};
+use penumbra::{Device, Partition};
 
 use super::worker::{DeviceCommand, DeviceEvent};
 use crate::components::ActivityExt;
@@ -137,42 +136,7 @@ pub fn actions() -> Vec<Box<dyn DeviceAction>> {
         Box::new(DumpAllPartitions),
         Box::new(WriteAllPartitions),
         Box::new(FlashScatter),
-        Box::new(ReadRpmb),
-        Box::new(WriteRpmb),
-        Box::new(EraseRpmb),
-        Box::new(LockBootloader),
-        Box::new(UnlockBootloader),
     ]
-}
-
-pub struct UnlockBootloader;
-
-impl DeviceAction for UnlockBootloader {
-    fn label(&self) -> &'static str {
-        "Unlock Bootloader"
-    }
-
-    fn run(&self, dev: &mut Device<'_, PortType>, io: &DeviceIo<'_>) -> anyhow::Result<bool> {
-        io.status("Unlocking bootloader...");
-        dev.set_seccfg_lock_state(LockState::Unlock)?;
-        io.status("Bootloader unlocked.");
-        Ok(true)
-    }
-}
-
-pub struct LockBootloader;
-
-impl DeviceAction for LockBootloader {
-    fn label(&self) -> &'static str {
-        "Lock Bootloader"
-    }
-
-    fn run(&self, dev: &mut Device<'_, PortType>, io: &DeviceIo<'_>) -> anyhow::Result<bool> {
-        io.status("Locking bootloader...");
-        dev.set_seccfg_lock_state(LockState::Lock)?;
-        io.status("Bootloader locked.");
-        Ok(true)
-    }
 }
 
 pub struct ReadPartition;
@@ -396,109 +360,6 @@ impl DeviceAction for WriteAllPartitions {
         }
 
         io.progress_finish("All partitions written.");
-        Ok(true)
-    }
-}
-
-pub struct ReadRpmb;
-
-impl DeviceAction for ReadRpmb {
-    fn label(&self) -> &'static str {
-        "Read RPMB"
-    }
-
-    fn run(&self, dev: &mut Device<'_, PortType>, io: &DeviceIo<'_>) -> anyhow::Result<bool> {
-        let Some(output_path) = io.ask_file("Output directory", true, None) else {
-            return Ok(false);
-        };
-
-        let socid = dev.devinfo().soc_id();
-        let file_name = format!("rpmb_{}.bin", hex::encode(socid));
-
-        let output_file = output_path.join(&file_name);
-
-        let file = File::create(&output_file)?;
-        let writer = BufWriter::new(file);
-
-        let Some(storage) = dev.get_storage() else {
-            return Err(anyhow::anyhow!("Failed to get RPMB size"));
-        };
-
-        let rpmb_size = storage.get_rpmb_size() as u32;
-        let sectors = rpmb_size / RPMB_FRAME_DATA_SZ as u32;
-
-        let reporter = io.progress_reporter();
-
-        io.progress_start(rpmb_size as u64, "Reading RPMB...");
-
-        dev.read_rpmb(RpmbRegion::R0, 0, sectors, writer, move |written, _total| {
-            reporter.update(written, None);
-        })?;
-
-        io.progress_finish(format!("Finished reading RPMB, saved to {}", file_name));
-        Ok(true)
-    }
-}
-
-pub struct WriteRpmb;
-
-impl DeviceAction for WriteRpmb {
-    fn label(&self) -> &'static str {
-        "Write RPMB"
-    }
-
-    fn run(&self, dev: &mut Device<'_, PortType>, io: &DeviceIo<'_>) -> anyhow::Result<bool> {
-        let Some(input_file) = io.ask_file("RPMB file", false, None) else {
-            return Ok(false);
-        };
-
-        let file = File::open(&input_file)?;
-        let reader = BufReader::new(file);
-
-        let Some(storage) = dev.get_storage() else {
-            return Err(anyhow::anyhow!("Failed to get RPMB size"));
-        };
-
-        let rpmb_size = storage.get_rpmb_size() as u32;
-        let sectors = rpmb_size / RPMB_FRAME_DATA_SZ as u32;
-
-        let reporter = io.progress_reporter();
-
-        io.progress_start(rpmb_size as u64, "Writing RPMB...");
-
-        dev.write_rpmb(RpmbRegion::R0, 0, sectors, reader, move |written, _total| {
-            reporter.update(written, None);
-        })?;
-
-        io.progress_finish("Finished writing RPMB.");
-        Ok(true)
-    }
-}
-
-pub struct EraseRpmb;
-
-impl DeviceAction for EraseRpmb {
-    fn label(&self) -> &'static str {
-        "Erase RPMB"
-    }
-
-    fn run(&self, dev: &mut Device<'_, PortType>, io: &DeviceIo<'_>) -> anyhow::Result<bool> {
-        let Some(storage) = dev.get_storage() else {
-            return Err(anyhow::anyhow!("Failed to get RPMB size"));
-        };
-
-        let rpmb_size = storage.get_rpmb_size() as u32;
-        let sectors = rpmb_size / RPMB_FRAME_DATA_SZ as u32;
-
-        let reporter = io.progress_reporter();
-
-        io.progress_start(rpmb_size as u64, "Erasing RPMB...");
-
-        dev.erase_rpmb(RpmbRegion::R0, 0, sectors, move |written, _total| {
-            reporter.update(written, None);
-        })?;
-
-        io.progress_finish("Finished erasing RPMB.");
         Ok(true)
     }
 }
