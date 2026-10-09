@@ -703,8 +703,10 @@ impl DownloadProtocol for Xml {
     }
 
     fn shutdown<P: MtkPort>(&mut self, port: &mut P) -> Result<()> {
-        info!("Shutting down device...");
-
+        // XML DA's Reboot command reboots using the currently selected boot mode.
+        // Reset it first so a previous Fastboot request cannot leak into shutdown.
+        info!("Returning device to normal boot (XML DA does not expose a confirmed power-off command)...");
+        xmlcmd_e!(self, port, SetBootMode, "IMMEDIATE", "USB", "ON", "ON")?;
         xmlcmd_e!(self, port, Reboot, "IMMEDIATE")
     }
 
@@ -714,7 +716,10 @@ impl DownloadProtocol for Xml {
             BootMode::Normal | BootMode::HomeScreen => self.shutdown(port),
             mode => {
                 let xml_mode: &str = mode.into();
-                xmlcmd_e!(self, port, SetBootMode, xml_mode, "USB", "ON", "ON")
+                // SetBootMode configures the target mode; Reboot is needed to
+                // actually leave DA mode and boot into that target.
+                xmlcmd_e!(self, port, SetBootMode, xml_mode, "USB", "ON", "ON")?;
+                xmlcmd_e!(self, port, Reboot, "IMMEDIATE")
             }
         }
     }
