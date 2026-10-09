@@ -148,6 +148,9 @@ pub fn actions() -> Vec<Box<dyn DeviceAction>> {
         Box::new(WriteAllPartitions),
         Box::new(FlashScatter),
         Box::new(BackupImei),
+        Box::new(RebootNormal),
+        Box::new(RebootFastboot),
+        Box::new(ShutdownDevice),
     ]
 }
 
@@ -373,6 +376,36 @@ impl DeviceAction for WriteAllPartitions {
 
         io.progress_finish("All partitions written.");
         Ok(true)
+    }
+}
+
+pub struct RebootNormal;
+impl DeviceAction for RebootNormal {
+    fn label(&self) -> &'static str { "Reboot to Normal" }
+    fn run(&self, dev: &mut Device<'_, PortType>, _io: &DeviceIo<'_>) -> anyhow::Result<bool> {
+        dev.reboot(penumbra::BootMode::Normal)?;
+        log::info!("Reboot command to Normal sent successfully.");
+        Ok(false)
+    }
+}
+
+pub struct RebootFastboot;
+impl DeviceAction for RebootFastboot {
+    fn label(&self) -> &'static str { "Reboot to Fastboot" }
+    fn run(&self, dev: &mut Device<'_, PortType>, _io: &DeviceIo<'_>) -> anyhow::Result<bool> {
+        dev.reboot(penumbra::BootMode::Fastboot)?;
+        log::info!("Reboot command to Fastboot sent successfully.");
+        Ok(false)
+    }
+}
+
+pub struct ShutdownDevice;
+impl DeviceAction for ShutdownDevice {
+    fn label(&self) -> &'static str { "Shutdown Device" }
+    fn run(&self, dev: &mut Device<'_, PortType>, _io: &DeviceIo<'_>) -> anyhow::Result<bool> {
+        dev.shutdown()?;
+        log::info!("Shutdown command sent successfully.");
+        Ok(false)
     }
 }
 
