@@ -409,6 +409,12 @@ impl FlashScatter {
             anyhow::bail!("No available partition images selected for flashing.");
         }
 
+        log::info!(
+            "Scatter flash prepared: scatter='{}', selected_partitions={}",
+            scatter.display(),
+            selected_set.len()
+        );
+
         let filtered_scatter = filter_scatter_downloads(&scatter_content, &selected_set);
         let files = ScatterFiles::new(scatter_dir);
         let readers = files.clone();
@@ -433,7 +439,12 @@ impl FlashScatter {
             });
         };
 
-        dev.flash_scatter(&filtered_scatter, reader_source, writer_sink, progress_callback)?;
+        log::info!("Scatter flash started: '{}'", scatter.display());
+        if let Err(error) = dev.flash_scatter(&filtered_scatter, reader_source, writer_sink, progress_callback) {
+            log::error!("Scatter flash failed for '{}': {error:#}", scatter.display());
+            return Err(error.into());
+        }
+        log::info!("Scatter flash completed successfully: '{}'", scatter.display());
         io.progress_finish("Successfully flashed from scatter file!");
         Ok(true)
     }
