@@ -65,6 +65,7 @@ pub struct DevicePage {
     progress_bar: ProgressBar,
     menu: SelectableList,
     partition_list: SelectableList,
+    saved_partition_items: Option<Vec<ListItemEntry>>,
     explorer: Option<FileExplorer>,
     current_time: String,
 
@@ -119,6 +120,7 @@ impl DevicePage {
             current_time: Self::now(),
             menu,
             partition_list,
+            saved_partition_items: None,
             explorer: None,
             focused: FocusedPanel::Menu,
             reconnect: true,
@@ -211,6 +213,7 @@ impl DevicePage {
                 }
 
                 DeviceEvent::NeedScatterFiles(items) => {
+                    self.saved_partition_items = Some(self.partition_list.items.clone());
                     self.busy = false;
                     self.focused = FocusedPanel::PartitionMenu;
                     self.partition_list.toggled = true;
@@ -308,6 +311,10 @@ impl DevicePage {
                     self.busy = false;
                     self.focused = FocusedPanel::Menu;
                     self.partition_list.toggled = false;
+                    if let Some(items) = self.saved_partition_items.take() {
+                        self.partition_list.items = items;
+                    }
+                    self.header_status = None;
                 }
 
                 DeviceEvent::Fatal(msg) => {
