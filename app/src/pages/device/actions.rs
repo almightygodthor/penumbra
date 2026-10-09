@@ -147,6 +147,7 @@ pub fn actions() -> Vec<Box<dyn DeviceAction>> {
         Box::new(DumpAllPartitions),
         Box::new(WriteAllPartitions),
         Box::new(FlashScatter),
+        Box::new(BackupImei),
     ]
 }
 
@@ -372,6 +373,99 @@ impl DeviceAction for WriteAllPartitions {
 
         io.progress_finish("All partitions written.");
         Ok(true)
+    }
+}
+
+/// Backs up partitions commonly associated with modem identity and calibration.
+pub struct BackupImei;
+
+impl DeviceAction for BackupImei {
+    fn label(&self) -> &'static str {
+        "Backup IMEI partitions"
+    }
+
+    fn run(&self, dev: &mut Device<'_, PortType>, io: &DeviceIo<'_>) -> anyhow::Result<bool> {
+        const PARTITIONS: &[&str] = &[
+            "nvram",
+            "nvdata",
+            "persist",
+            "nvcfg",
+            "ocdt",
+            "oplus_custom",
+            "oplusreserve1",
+        ];
+
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let output_dir = std::env::current_dir()?.join(format!("IMEI_Backup_{stamp}"));
+        std::fs::create_dir_all(&output_dir)?;
+
+        let available: Vec<Partition> = dev.partitions_iter().collect();
+        let present: Vec<&str> = PARTITIONS.iter().copied()
+            .filter(|name| available.iter().any(|partition| partition.name == *name))
+            .collect();
+        let missing: Vec<&str> = PARTITIONS.iter().copied()
+            .filter(|name| !available.iter().any(|partition| partition.name == *name))
+            .collect();
+
+        if present.is_empty() {
+            anyhow::bail!("None of the requested IMEI-related partitions were found on this device.");
+        }
+
+        io.status(format!("IMEI backup folder: {}", output_dir.display()));
+        log::info!("Starting IMEI-related partition backup.");
+        log::info!("Backup destination: {}", output_dir.display());
+        for name in &missing {
+            log::warn!("IMEI backup: partition '{}' not present; skipped.", name);
+        }
+
+        let total_bytes: u64 = available.iter()
+            .filter(|partition| present.contains(&partition.name.as_str()))
+            .map(|partition| partition.size)
+            .sum();
+        io.progress_start(total_bytes, "Backing up IMEI-related partitions...");
+        let reporter = io.progress_reporter();
+        let mut bytes_done = 0_u64;
+        let mut backed_up = Vec::new();
+
+        for name in &present {
+            let partition = available.iter().find(|partition| partition.name == *name).unwrap();
+            let path = output_dir.join(format!("{name}.img"));
+            io.status(format!("Backing up {name}..."));
+            log::info!("Reading partition '{}' -> '{}'", name, path.display());
+
+            let file = File::create(&path)?;
+            let mut writer = BufWriter::new(file);
+            let partition_name = (*name).to_string();
+            let progress = reporter.clone();
+            let base = bytes_done;
+
+            if let Err(error) = dev.read_partition(name, &mut writer, move |read, _total| {
+                progress.update(base + read, Some(format!("Backing up {partition_name}...")));
+            }) {
+                log::error!("IMEI backup failed for '{}': {error:#}", name);
+                io.status(format!("Backup failed for {name}: {error}"));
+                return Err(error.into());
+            }
+
+            bytes_done += partition.size;
+            backed_up.push((*name).to_string());
+            log::info!("[BACKUP OK] {} -> {}", name, path.display());
+            io.status(format!("Backed up {}/{}: {}", backed_up.len(), present.len(), name));
+        }
+
+        log::info!("========== IMEI BACKUP REPORT ==========");
+        for name in &backed_up {
+            log::info!("[OK] {}.img", name);
+        }
+        log::info!("Backed up: {}", backed_up.len());
+        log::info!("Skipped (not present): {}", missing.len());
+        log::info!("Backup location: {}", output_dir.display());
+        io.progress_finish(format!("IMEI backup saved to {}", output_dir.display()));
+        io.status(format!("IMEI backup saved: {}", output_dir.display()));
+        Ok(false)
     }
 }
 
