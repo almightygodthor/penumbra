@@ -440,12 +440,30 @@ impl FlashScatter {
         };
 
         log::info!("Scatter flash started: '{}'", scatter.display());
+        io.status(format!("Flashing {} selected partitions...", selected_set.len()));
         if let Err(error) = dev.flash_scatter(&filtered_scatter, reader_source, writer_sink, progress_callback) {
-            log::error!("Scatter flash failed for '{}': {error:#}", scatter.display());
+            log::error!("Scatter flash operation failed: {error:#}",);
+            log::error!("Scatter flash report: {} selected; overall operation FAILED. Individual write completion cannot be confirmed by the scatter API.", selected_set.len());
             return Err(error.into());
         }
+
+        // The scatter API reports aggregate success, not an independent read-back
+        // verification for every partition. Label entries as operation-completed,
+        // never as content-verified.
+        log::info!("========== SCATTER FLASH REPORT ==========");
+        let mut report_names: Vec<&str> = selected_set.iter().copied().collect();
+        report_names.sort_unstable();
+        for name in &report_names {
+            log::info!("[OK] {} — write operation completed (not read-back verified)", name);
+            io.status(format!("Flash report: {}/{} completed", report_names.iter().position(|n| n == name).unwrap_or(0) + 1, report_names.len()));
+        }
+        log::info!("Selected: {}", report_names.len());
+        log::info!("Completed: {}", report_names.len());
+        log::info!("Failed: 0 (scatter API returned success)");
+        log::info!("Read-back verification: NOT PERFORMED");
+        log::info!("Report complete.");
         log::info!("Scatter flash completed successfully: '{}'", scatter.display());
-        io.progress_finish("Successfully flashed from scatter file!");
+        io.progress_finish(format!("Scatter flash operation completed: {} selected; read-back verification not performed.", report_names.len()));
         Ok(true)
     }
 }
