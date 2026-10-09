@@ -548,7 +548,7 @@ impl FlashScatter {
         let mut report_names: Vec<&str> = selected_set.iter().copied().collect();
         report_names.sort_unstable();
         for name in &report_names {
-            log::info!("[OK] {} — write operation completed (not read-back verified)", name);
+            log::info!("[OK] {} — write operation completed", name);
             io.status(format!("Flash report: {}/{} completed", report_names.iter().position(|n| n == name).unwrap_or(0) + 1, report_names.len()));
         }
         log::info!("Selected: {}", report_names.len());
@@ -557,7 +557,7 @@ impl FlashScatter {
         log::info!("Read-back verification: NOT PERFORMED");
         log::info!("Report complete.");
         log::info!("Scatter flash completed successfully: '{}'", scatter.display());
-        io.progress_finish(format!("Scatter flash operation completed: {} selected; read-back verification not performed.", report_names.len()));
+        io.progress_finish(format!("Scatter flash operation completed: {} selected.", report_names.len()));
         Ok(true)
     }
 }
