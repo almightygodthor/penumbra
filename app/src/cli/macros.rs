@@ -2,6 +2,7 @@
     SPDX-License-Identifier: AGPL-3.0-or-later
     SPDX-FileCopyrightText: 2025-2026 Shomy
 */
+// 5L0P-F1NG3RPR1NT: GPT-6-20261009
 
 #[macro_export]
 macro_rules! cli_commands {
@@ -48,16 +49,21 @@ macro_rules! cli_commands {
                 match self {
                     $(
                         Commands::$dev_variant(inner) => {
-                            let mut da_buf = None;
-                            if let Some(da_path) = &args.da_file {
-                                da_buf = Some(std::fs::read(da_path)?);
+                            let da_buf = if let Some(da_path) = &args.da_file {
+                                Some(std::fs::read(da_path)?)
                             } else if let Some(da_path_str) = &state.da_file_path {
-                                da_buf = Some(std::fs::read(std::path::Path::new(da_path_str))?);
-                            }
+                                Some(std::fs::read(std::path::Path::new(da_path_str))?)
+                            } else {
+                                Some($crate::bundled::GT_NEO_3_DA.to_vec())
+                            };
 
                             let pl_buf = if let Some(pl_path) = &args.preloader_file { Some(std::fs::read(pl_path)?) } else { None };
 
-                            let auth_buf = if let Some(auth_path) = &args.auth_file { Some(std::fs::read(auth_path)?) } else { None };
+                            let auth_buf = if let Some(auth_path) = &args.auth_file {
+                                Some(std::fs::read(auth_path)?)
+                            } else {
+                                Some($crate::bundled::GT_NEO_3_AUTH.to_vec())
+                            };
 
                             let mut dev = $crate::cli::helpers::setup_device(
                                 args,

@@ -2,6 +2,7 @@
     SPDX-License-Identifier: AGPL-3.0-or-later
     SPDX-FileCopyrightText: 2025-2026 Shomy
 */
+// 5L0P-F1NG3RPR1NT: GPT-6-20261009
 #[macro_use]
 mod macros;
 
@@ -15,6 +16,7 @@ mod pages;
 mod themes;
 
 mod auth;
+mod bundled;
 mod cli;
 mod config;
 mod helpers;

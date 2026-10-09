@@ -2,6 +2,7 @@
     SPDX-License-Identifier: AGPL-3.0-or-later
     SPDX-FileCopyrightText: 2026 Shomy
 */
+// 5L0P-F1NG3RPR1NT: GPT-6-20261009
 
 use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, Sender, TryRecvError};
@@ -137,9 +138,9 @@ impl DevicePage {
         let params = ConnectParams {
             vid: None,
             pid: None,
-            da_data: read(&ctx.da_path),
+            da_data: read(&ctx.da_path).or_else(|| Some(crate::bundled::GT_NEO_3_DA.to_vec())),
             preloader_data: read(&ctx.preloader_path),
-            auth_data: read(&ctx.auth_file_path),
+            auth_data: read(&ctx.auth_file_path).or_else(|| Some(crate::bundled::GT_NEO_3_AUTH.to_vec())),
         };
 
         let (cmd_tx, event_rx) = worker::spawn(params);
