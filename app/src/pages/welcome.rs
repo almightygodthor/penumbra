@@ -8,11 +8,11 @@ use ratatui::crossterm::event::{KeyCode, KeyEvent};
 use ratatui::layout::{Alignment, Constraint, Layout};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Clear, Paragraph, Widget};
+use ratatui::widgets::{Paragraph, Widget};
 
 use crate::app::{AppCtx, AppPage};
 use crate::components::layout::MainLayout;
-use crate::components::{Component, DescriptionMenu, ExplorerResult, FileExplorer, RectExt, Stars};
+use crate::components::{Component, DescriptionMenu, Stars};
 use crate::pages::{LOGO, LOGO_ASCII, Page};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -22,14 +22,7 @@ pub enum MenuAction {
     Quit,
 }
 
-#[derive(Default)]
-enum WelcomeState {
-    #[default]
-    Idle,
-}
-
 pub struct WelcomePage {
-    state: WelcomeState,
     menu: DescriptionMenu<MenuAction>,
     stars: Stars,
 }
@@ -42,7 +35,7 @@ impl WelcomePage {
             ('*', "Quit", "Exit Antumbra." => MenuAction::Quit),
         ];
 
-        Self { state: WelcomeState::Idle, menu, stars: Stars::default() }
+        Self { menu, stars: Stars::default() }
     }
 
     fn handle_menu_selection(&mut self, ctx: &mut AppCtx) {
@@ -109,7 +102,6 @@ impl Page for WelcomePage {
                 Widget::render(files_indicator, files_block, buf);
             },
         );
-
     }
 
     fn handle_input(&mut self, ctx: &mut AppCtx, key: KeyEvent) {
@@ -120,4 +112,4 @@ impl Page for WelcomePage {
             _ => {}
         }
     }
-}}
+}
