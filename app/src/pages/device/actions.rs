@@ -12,7 +12,7 @@ use penumbra::activity::DeviceActivity;
 use penumbra::port::PortType;
 use penumbra::{Device, Partition};
 
-use super::worker::{DeviceCommand, DeviceEvent};
+use super::worker::{DeviceCommand, DeviceEvent, ScatterReviewItem};
 use crate::components::ActivityExt;
 use crate::helpers::ScatterFiles;
 
@@ -88,6 +88,17 @@ impl<'a> DeviceIo<'a> {
     }
 
     /// Asks the UI to open the file explorer to let the user pick a file or directory.
+    pub fn ask_scatter_selection(&self, items: Vec<ScatterReviewItem>) -> Option<Vec<String>> {
+        let _ = self.event_tx.send(DeviceEvent::NeedScatterFiles(items));
+        loop {
+            match self.cmd_rx.recv() {
+                Ok(DeviceCommand::PartitionsChosen(names)) if !names.is_empty() => return Some(names),
+                Ok(DeviceCommand::Cancel) | Err(_) => return None,
+                _ => {}
+            }
+        }
+    }
+
     pub fn ask_file(
         &self,
         title: impl Into<String>,
@@ -381,9 +392,38 @@ impl DeviceAction for FlashScatter {
         };
 
         let scatter_content = std::fs::read_to_string(&scatter)?;
-
         let scatter_dir = scatter.parent().unwrap_or_else(|| Path::new("")).to_path_buf();
 
+        let items = scatter_review_items(&scatter_content, &scatter_dir);
+        if items.is_empty() {
+            anyhow::bail!("No partitions were found in the selected scatter file.");
+        }
+
+        let Some(selected) = io.ask_scatter_selection(items.clone()) else {
+            return Ok(false);
+        };
+
+        let selected_names: std::collections::HashSet<&str> =
+            selected.iter().map(String::as_str).collect();
+        let missing: Vec<String> = items
+            .iter()
+            .filter(|item| item.downloadable && selected_names.contains(item.name.as_str()) && !item.found)
+            .map(|item| format!("{}: {}", item.name, scatter_display_path(&item.filename, &scatter_dir).display()))
+            .collect();
+        if !missing.is_empty() {
+            anyhow::bail!("Selected partition image(s) are missing:\n{}", missing.join("\n"));
+        }
+
+        let selected_set: std::collections::HashSet<&str> = items
+            .iter()
+            .filter(|item| item.downloadable && item.found && selected_names.contains(item.name.as_str()))
+            .map(|item| item.name.as_str())
+            .collect();
+        if selected_set.is_empty() {
+            anyhow::bail!("No available partition images selected for flashing.");
+        }
+
+        let filtered_scatter = filter_scatter_downloads(&scatter_content, &selected_set);
         let files = ScatterFiles::new(scatter_dir);
         let readers = files.clone();
 
@@ -410,10 +450,90 @@ impl DeviceAction for FlashScatter {
             });
         };
 
-        dev.flash_scatter(&scatter_content, reader_source, writer_sink, progress_callback)?;
+        dev.flash_scatter(&filtered_scatter, reader_source, writer_sink, progress_callback)?;
 
         io.progress_finish("Successfully flashed from scatter file!");
 
         Ok(true)
     }
+}
+
+
+fn scatter_tag(block: &str, tag: &str) -> Option<String> {
+    let open = format!("<{tag}>");
+    let close = format!("</{tag}>");
+    let start = block.find(&open)? + open.len();
+    let end = block[start..].find(&close)? + start;
+    Some(block[start..end].trim().to_string())
+}
+
+fn scatter_display_path(filename: &str, base_dir: &Path) -> PathBuf {
+    if Path::new(filename).is_absolute() {
+        return PathBuf::from(filename);
+    }
+
+    let mut clean = filename.trim_start_matches("./");
+    if let Some(stripped) = clean.strip_prefix("backup/") {
+        clean = stripped.trim_start_matches("./");
+    }
+    if let Some(stripped) = clean.strip_prefix("out/") {
+        clean = stripped.trim_start_matches("./");
+    }
+    base_dir.join(clean)
+}
+
+fn scatter_review_items(content: &str, base_dir: &Path) -> Vec<ScatterReviewItem> {
+    let mut items = Vec::new();
+    let mut rest = content;
+    while let Some(start) = rest.find("<partition_index>") {
+        rest = &rest[start..];
+        let Some(end_rel) = rest.find("</partition_index>") else { break };
+        let block = &rest[..end_rel + "</partition_index>".len()];
+        rest = &rest[end_rel + "</partition_index>".len()..];
+
+        let Some(name) = scatter_tag(block, "partition_name") else { continue };
+        let filename = scatter_tag(block, "file_name").unwrap_or_else(|| "NONE".into());
+        let downloadable = scatter_tag(block, "is_download").is_some_and(|v| v.eq_ignore_ascii_case("true"))
+            && filename != "NONE";
+        let found = if !downloadable {
+            false
+        } else {
+            scatter_display_path(&filename, base_dir).is_file()
+        };
+
+        items.push(ScatterReviewItem { name, filename, found, downloadable });
+    }
+    items
+}
+
+fn filter_scatter_downloads(content: &str, selected: &std::collections::HashSet<&str>) -> String {
+    let mut output = String::with_capacity(content.len());
+    let mut rest = content;
+    while let Some(start) = rest.find("<partition_index>") {
+        output.push_str(&rest[..start]);
+        rest = &rest[start..];
+        let Some(end_rel) = rest.find("</partition_index>") else {
+            output.push_str(rest);
+            return output;
+        };
+        let end = end_rel + "</partition_index>".len();
+        let block = &rest[..end];
+        let name = scatter_tag(block, "partition_name").unwrap_or_default();
+        if !selected.contains(name.as_str()) {
+            let mut changed = block.to_string();
+            if let Some(value_start) = changed.find("<is_download>") {
+                let value_start = value_start + "<is_download>".len();
+                if let Some(value_end_rel) = changed[value_start..].find("</is_download>") {
+                    let value_end = value_start + value_end_rel;
+                    changed.replace_range(value_start..value_end, "false");
+                }
+            }
+            output.push_str(&changed);
+        } else {
+            output.push_str(block);
+        }
+        rest = &rest[end..];
+    }
+    output.push_str(rest);
+    output
 }

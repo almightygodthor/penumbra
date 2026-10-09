@@ -65,6 +65,7 @@ pub struct DevicePage {
     progress_bar: ProgressBar,
     menu: SelectableList,
     partition_list: SelectableList,
+    saved_partition_items: Option<Vec<ListItemEntry>>,
     explorer: Option<FileExplorer>,
     current_time: String,
 
@@ -119,6 +120,7 @@ impl DevicePage {
             current_time: Self::now(),
             menu,
             partition_list,
+            saved_partition_items: None,
             explorer: None,
             focused: FocusedPanel::Menu,
             reconnect: true,
@@ -210,6 +212,44 @@ impl DevicePage {
                     self.partition_list.clear_toggles();
                 }
 
+                DeviceEvent::NeedScatterFiles(items) => {
+                    self.saved_partition_items = Some(self.partition_list.items.clone());
+                    self.busy = false;
+                    self.focused = FocusedPanel::PartitionMenu;
+                    self.partition_list.toggled = true;
+                    self.partition_list.clear_toggles();
+                    self.partition_list.items = items
+                        .iter()
+                        .map(|item| {
+                            let status = if !item.downloadable {
+                                "Not flashable"
+                            } else if item.found {
+                                "Found"
+                            } else {
+                                "Missing"
+                            };
+                            ListItemEntry::new(
+                                format!("{} | {} | {}", item.name, item.filename, status),
+                                Some(item.name.clone()),
+                                None,
+                            )
+                        })
+                        .collect();
+
+                    // Found, flashable images are selected by default. Space toggles
+                    // individual entries, matching Penumbra's existing partition picker.
+                    for (index, item) in items.iter().enumerate() {
+                        if item.downloadable && item.found {
+                            self.partition_list.state.select(Some(index));
+                            self.partition_list.toggle_selected();
+                        }
+                    }
+                    self.partition_list.state.select(Some(0));
+                    self.header_status = Some(
+                        "Scatter review: Space toggle • Enter confirm • Esc cancel".into(),
+                    );
+                }
+
                 DeviceEvent::NeedFile { title, directories_only, extensions } => {
                     self.explorer_dirs_only = directories_only;
                     let explorer = FileExplorer::new(title).map(|explorer| {
@@ -271,6 +311,10 @@ impl DevicePage {
                     self.busy = false;
                     self.focused = FocusedPanel::Menu;
                     self.partition_list.toggled = false;
+                    if let Some(items) = self.saved_partition_items.take() {
+                        self.partition_list.items = items;
+                    }
+                    self.header_status = None;
                 }
 
                 DeviceEvent::Fatal(msg) => {
