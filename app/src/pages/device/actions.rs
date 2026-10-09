@@ -408,7 +408,7 @@ impl DeviceAction for FlashScatter {
         let missing: Vec<String> = items
             .iter()
             .filter(|item| item.downloadable && selected_names.contains(item.name.as_str()) && !item.found)
-            .map(|item| format!("{}: {}", item.name, scatter_display_path(&item.filename, &scatter_dir)))
+            .map(|item| format!("{}: {}", item.name, scatter_display_path(&item.filename, &scatter_dir).display()))
             .collect();
         if !missing.is_empty() {
             anyhow::bail!("Selected partition image(s) are missing:\n{}", missing.join("\n"));
