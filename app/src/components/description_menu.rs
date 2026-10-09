@@ -89,22 +89,31 @@ impl<A> DescriptionMenu<A> {
 
     fn wrap_text(s: &str, max_width: usize) -> Vec<String> {
         let mut lines = Vec::new();
-        let mut current = String::new();
+        let width = max_width.max(1);
 
-        for word in s.split_whitespace() {
-            if !current.is_empty() && current.len() + word.len() + 1 > max_width {
-                lines.push(current.clone());
-                current.clear();
+        // Preserve intentional line breaks while wrapping each line to fit.
+        for paragraph in s.lines() {
+            let mut current = String::new();
+
+            for word in paragraph.split_whitespace() {
+                if !current.is_empty() && current.len() + word.len() + 1 > width {
+                    lines.push(std::mem::take(&mut current));
+                }
+
+                if !current.is_empty() {
+                    current.push(' ');
+                }
+                current.push_str(word);
             }
+
+            // Keep empty paragraphs as blank lines so explicit spacing is retained.
             if !current.is_empty() {
-                current.push(' ');
+                lines.push(current);
+            } else if paragraph.is_empty() {
+                lines.push(String::new());
             }
-            current.push_str(word);
         }
 
-        if !current.is_empty() {
-            lines.push(current);
-        }
         lines
     }
 }
