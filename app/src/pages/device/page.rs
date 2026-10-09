@@ -433,7 +433,8 @@ impl DevicePage {
 
     fn handle_partition_input(&mut self, ctx: &mut AppCtx, key: KeyEvent) {
         if self.scatter_review_mode {
-            if self.partition_list.handle_key(key, ctx) { return; }
+            // Handle Escape/Enter before the generic list handler, which consumes
+            // recognized keys and would otherwise swallow cancellation.
             match key.code {
                 KeyCode::Esc => {
                     self.scatter_review_mode = false;
@@ -468,7 +469,11 @@ impl DevicePage {
                         self.connect(ctx);
                     }
                 }
-                _ => {}
+                _ => {
+                    if self.partition_list.handle_key(key, ctx) {
+                        return;
+                    }
+                }
             }
             return;
         }
