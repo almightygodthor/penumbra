@@ -11,7 +11,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Widget};
 
 use crate::app::{AppCtx, AppPage};
-use crate::components::layout::MainLayout;
+use crate::components::layout::{MainLayout, RectExt};
 use crate::components::{Component, DescriptionMenu, Stars};
 use crate::pages::{LOGO, LOGO_ASCII, Page};
 
