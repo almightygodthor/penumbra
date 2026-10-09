@@ -42,6 +42,14 @@ impl ConnectParams {
     }
 }
 
+#[derive(Clone)]
+pub struct ScatterReviewItem {
+    pub name: String,
+    pub filename: String,
+    pub found: bool,
+    pub downloadable: bool,
+}
+
 pub enum DeviceCommand {
     RunAction(usize),
     PartitionsChosen(Vec<String>),
@@ -56,6 +64,7 @@ pub enum DeviceEvent {
     PartitionsChanged(Vec<Partition>),
 
     NeedPartitions,
+    NeedScatterFiles(Vec<ScatterReviewItem>),
     NeedFile { title: String, directories_only: bool, extensions: Option<Vec<&'static str>> },
 
     ProgressStart { total_bytes: u64, message: String },
