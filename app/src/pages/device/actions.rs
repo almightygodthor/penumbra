@@ -4,7 +4,7 @@
 */
 
 use std::fs::File;
-use std::io::{BufReader, BufWriter};
+use std::io::{BufReader, BufWriter, Read};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, Sender};
 
@@ -14,7 +14,6 @@ use penumbra::{Device, Partition};
 
 use super::worker::{DeviceCommand, DeviceEvent, ScatterReviewItem};
 use crate::components::ActivityExt;
-use crate::helpers::ScatterFiles;
 
 pub struct DeviceIo<'a> {
     event_tx: &'a Sender<DeviceEvent>,
@@ -531,55 +530,103 @@ impl FlashScatter {
             selected_set.len()
         );
 
-        let filtered_scatter = filter_scatter_downloads(&scatter_content, &selected_set);
-        let files = ScatterFiles::new(scatter_dir);
-        let readers = files.clone();
-        let reader_source = move |file_path: &str| readers.reader(file_path);
-        let writer_sink = move |file_path: &str| files.writer(file_path);
+        // Use the same per-partition XML DA command as the working "Write Partition"
+        // action. The DA's FlashUpdate scatter flow can return aggregate success without
+        // proving that each requested image was transferred to its intended partition.
+        let available: Vec<Partition> = dev.partitions_iter().collect();
+        let mut to_write: Vec<(ScatterReviewItem, Partition, PathBuf, u64)> = Vec::new();
 
-        let mut started = false;
-        let event_tx = io.event_tx.clone();
-        let activity = io.activity_handle();
-        let progress_callback = move |curr: u64, total: u64| {
-            if !started {
-                let _ = event_tx.send(DeviceEvent::ProgressStart {
-                    total_bytes: total,
-                    message: "Flashing from scatter file...".into(),
-                });
-                started = true;
+        for item in items.iter().filter(|item| {
+            item.downloadable && item.found && selected_names.contains(item.name.as_str())
+        }) {
+            let partition = available
+                .iter()
+                .find(|partition| partition.name == item.name)
+                .cloned()
+                .ok_or_else(|| anyhow::anyhow!(
+                    "Selected scatter partition '{}' is not present in the device partition table.",
+                    item.name
+                ))?;
+            let path = scatter_display_path(&item.filename, &scatter_dir);
+            let size = std::fs::metadata(&path)?.len();
+            if size == 0 {
+                anyhow::bail!("Selected image for '{}' is empty: {}", item.name, path.display());
             }
-            let _ = event_tx.send(DeviceEvent::ProgressUpdate {
-                written: curr,
-                total: Some(total),
-                message: activity.current().detail(),
-            });
-        };
+            if size > partition.size {
+                anyhow::bail!(
+                    "Image for '{}' is too large ({} bytes; partition size {} bytes): {}",
+                    item.name, size, partition.size, path.display()
+                );
+            }
 
-        log::info!("Scatter flash started: '{}'", scatter.display());
-        io.status(format!("Flashing {} selected partitions...", selected_set.len()));
-        if let Err(error) = dev.flash_scatter(&filtered_scatter, reader_source, writer_sink, progress_callback) {
-            log::error!("Scatter flash operation failed: {error:#}",);
-            log::error!("Scatter flash report: {} selected; overall operation FAILED. Individual write completion cannot be confirmed by the scatter API.", selected_set.len());
-            return Err(error.into());
+            // XML DA WritePartition accepts raw images. Reject Android sparse images
+            // rather than silently treating their container bytes as a raw partition image.
+            let mut probe = File::open(&path)?;
+            let mut magic = [0u8; 4];
+            if probe.read_exact(&mut magic).is_ok() && magic == [0x3a, 0xff, 0x26, 0xed] {
+                anyhow::bail!(
+                    "Image for '{}' is Android sparse. This direct-write path requires a raw image: {}",
+                    item.name, path.display()
+                );
+            }
+            to_write.push((item.clone(), partition, path, size));
         }
 
-        // The scatter API reports aggregate success, not an independent read-back
-        // verification for every partition. Label entries as operation-completed,
-        // never as content-verified.
+        if to_write.is_empty() {
+            anyhow::bail!("No valid, selected scatter images are available to write.");
+        }
+
+        let total_bytes: u64 = to_write.iter().map(|(_, _, _, size)| *size).sum();
+        let mut bytes_done = 0u64;
+        io.progress_start(total_bytes, "Writing selected scatter partitions...");
+        let reporter = io.progress_reporter();
+
+        log::info!("Scatter flash started using direct per-partition writes: '{}'", scatter.display());
+        log::info!("Direct-write plan: {} partition(s), {} image bytes.", to_write.len(), total_bytes);
+        io.status(format!("Writing {} selected partitions...", to_write.len()));
+
+        let mut completed = Vec::new();
+        for (item, partition, path, size) in &to_write {
+            log::info!(
+                "Writing scatter entry '{}' via WritePartition: image='{}', partition_size=0x{:X}, image_size=0x{:X}",
+                item.name, path.display(), partition.size, size
+            );
+            io.status(format!("Writing {}...", item.name));
+
+            let file = File::open(path)?;
+            let mut reader = BufReader::new(file);
+            let name = item.name.clone();
+            let progress = reporter.clone();
+            let base = bytes_done;
+
+            if let Err(error) = dev.write_partition(&partition.name, *size, &mut reader, move |written, _total| {
+                progress.update(base + written, Some(format!("Writing '{}'...", name)));
+            }) {
+                log::error!("Scatter direct write failed for '{}': {error:#}", item.name);
+                log::error!("Scatter flash stopped after {} successful partition write(s).", completed.len());
+                return Err(error.into());
+            }
+
+            bytes_done += *size;
+            completed.push(item.name.clone());
+            log::info!(
+                "[WRITE OK] {} — direct WritePartition returned success ({} bytes submitted)",
+                item.name, size
+            );
+            io.status(format!("Written {}/{}: {}", completed.len(), to_write.len(), item.name));
+        }
+
         log::info!("========== SCATTER FLASH REPORT ==========");
-        let mut report_names: Vec<&str> = selected_set.iter().copied().collect();
-        report_names.sort_unstable();
-        for name in &report_names {
-            log::info!("[OK] {} — write operation completed", name);
-            io.status(format!("Flash report: {}/{} completed", report_names.iter().position(|n| n == name).unwrap_or(0) + 1, report_names.len()));
+        for name in &completed {
+            log::info!("[OK] {} — direct partition write completed", name);
         }
-        log::info!("Selected: {}", report_names.len());
-        log::info!("Completed: {}", report_names.len());
-        log::info!("Failed: 0 (scatter API returned success)");
+        log::info!("Selected: {}", to_write.len());
+        log::info!("Completed: {}", completed.len());
+        log::info!("Failed: 0 (all direct WritePartition calls returned success)");
         log::info!("Read-back verification: NOT PERFORMED");
         log::info!("Report complete.");
-        log::info!("Scatter flash completed successfully: '{}'", scatter.display());
-        io.progress_finish(format!("Scatter flash operation completed: {} selected.", report_names.len()));
+        io.progress_finish(format!("Scatter writes completed: {} partition(s).", completed.len()));
+
         Ok(true)
     }
 }
