@@ -445,6 +445,21 @@ impl DevicePage {
             // Handle Escape/Enter before the generic list handler, which consumes
             // recognized keys and would otherwise swallow cancellation.
             match key.code {
+                // A selects every available image; D clears all selections.
+                // Only found, downloadable entries can be selected for flashing.
+                KeyCode::Char('a') | KeyCode::Char('A') => {
+                    self.partition_list.clear_toggles();
+                    for (index, item) in self.scatter_items.iter().enumerate() {
+                        if item.downloadable && item.found {
+                            self.partition_list.state.select(Some(index));
+                            self.partition_list.toggle_selected();
+                        }
+                    }
+                }
+                KeyCode::Char('d') | KeyCode::Char('D') => {
+                    self.partition_list.clear_toggles();
+                    self.partition_list.state.select(Some(0));
+                }
                 KeyCode::Esc => {
                     self.scatter_review_mode = false;
                     self.scatter_items.clear();
@@ -812,9 +827,16 @@ impl Page for DevicePage {
         // connection attempt instead of trapping input behind the busy guard.
         if self.pending_scatter.is_some() && key.code == KeyCode::Esc {
             self.pending_scatter = None;
+            // Stop the waiting worker and drop its channel before returning to the menu.
             self.send(DeviceCommand::Shutdown);
-            self.reset();
+            self.cmd_tx = None;
+            self.event_rx = None;
+            self.status = DeviceStatus::Disconnected;
+            self.activity = Activity::Idle;
+            self.progress_bar.reset();
+            self.busy = false;
             self.reconnect = false;
+            self.explorer = None;
             self.focused = FocusedPanel::Menu;
             self.scatter_picker = false;
             self.scatter_review_mode = false;
