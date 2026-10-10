@@ -150,7 +150,6 @@ pub fn actions() -> Vec<Box<dyn DeviceAction>> {
         Box::new(BackupImei),
         Box::new(RebootNormal),
         Box::new(RebootFastboot),
-        Box::new(ShutdownDevice),
     ]
 }
 
@@ -395,16 +394,6 @@ impl DeviceAction for RebootFastboot {
     fn run(&self, dev: &mut Device<'_, PortType>, _io: &DeviceIo<'_>) -> anyhow::Result<bool> {
         dev.reboot(penumbra::BootMode::Fastboot)?;
         log::info!("Reboot command to Fastboot sent successfully.");
-        Ok(false)
-    }
-}
-
-pub struct ShutdownDevice;
-impl DeviceAction for ShutdownDevice {
-    fn label(&self) -> &'static str { "Shutdown Device" }
-    fn run(&self, dev: &mut Device<'_, PortType>, _io: &DeviceIo<'_>) -> anyhow::Result<bool> {
-        dev.shutdown()?;
-        log::info!("Shutdown command sent successfully.");
         Ok(false)
     }
 }
