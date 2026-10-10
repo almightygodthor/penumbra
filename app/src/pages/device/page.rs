@@ -807,6 +807,23 @@ impl Page for DevicePage {
             return;
         }
 
+        // After confirming scatter review, the device may still be disconnected and
+        // the worker waits for BROM/Preloader. Allow Escape to cancel that pending
+        // connection attempt instead of trapping input behind the busy guard.
+        if self.pending_scatter.is_some() && key.code == KeyCode::Esc {
+            self.pending_scatter = None;
+            self.send(DeviceCommand::Shutdown);
+            self.reset();
+            self.reconnect = false;
+            self.focused = FocusedPanel::Menu;
+            self.scatter_picker = false;
+            self.scatter_review_mode = false;
+            self.scatter_items.clear();
+            self.scatter_path = None;
+            self.header_status = Some("Scatter flash cancelled.".into());
+            return;
+        }
+
         if self.busy {
             return;
         }
