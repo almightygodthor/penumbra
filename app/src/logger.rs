@@ -75,6 +75,7 @@ pub fn init_logger(tui_mode: bool, verbose: bool) {
         }
     }
 
+    let formatter_log_path = path.clone();
     builder.format(move |buf: &mut Formatter, record: &Record| {
         let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f %:z");
         if let Some(ref log_file) = log_file {
@@ -82,7 +83,7 @@ pub fn init_logger(tui_mode: bool, verbose: bool) {
             // Recover a poisoned mutex rather than panicking inside the global logger.
             let mut file = log_file.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
             if let Err(error) = writeln!(file, "[{timestamp}] [{}] {}", record.level(), record.args()) {
-                eprintln!("Antumbra: failed writing log file '{}': {error}", path.display());
+                eprintln!("Antumbra: failed writing log file '{}': {error}", formatter_log_path.display());
             }
         }
 
