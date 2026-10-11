@@ -6,7 +6,7 @@ use log::debug;
 use memchr::memmem;
 
 use crate::activity::Activity;
-use crate::da::protocol::{SPARSE_TIMEOUT, SUPER_TIMEOUT};
+use crate::da::protocol::{LARGE_PARTITION_TIMEOUT, SPARSE_TIMEOUT};
 use crate::da::xml::structs::{PartitionChangedStatus, ProtectedRecord};
 use crate::da::xml::{
     CMD_DOWNLOAD_FILE,
@@ -185,11 +185,13 @@ where
                 xml.process_file_sys_op(port, &resp, op)?;
             }
             CMD_DOWNLOAD_FILE => {
-                // The super partition is exceptionally large and can take several
-                // minutes to finish processing on the device. Keep the longer
-                // timeout scoped to this partition only.
-                let timeout = if part_name.eq_ignore_ascii_case("super") {
-                    SUPER_TIMEOUT
+                // Large dynamic partitions and userdata can take much longer for
+                // the DA to process than ordinary partitions. Keep this longer
+                // timeout scoped to these known large partitions.
+                let needs_extended_timeout = part_name.eq_ignore_ascii_case("super")
+                    || part_name.eq_ignore_ascii_case("userdata");
+                let timeout = if needs_extended_timeout {
+                    LARGE_PARTITION_TIMEOUT
                 } else {
                     MAX_TIMEOUT
                 };
@@ -203,7 +205,7 @@ where
                     &mut progress,
                 )?;
 
-                if part_name.eq_ignore_ascii_case("super") {
+                if needs_extended_timeout {
                     // process_download_data restores the minimum timeout after
                     // transfer; the DA may still need time before its next response.
                     port.set_timeout(MAX_TIMEOUT)?;
