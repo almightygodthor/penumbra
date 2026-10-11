@@ -139,52 +139,50 @@ impl Read for SparseReader {
         }
 
         loop {
-            match &mut self.active {
-                ActiveChunk::Raw(remaining) => {
-                    let amount = buf.len().min((*remaining).min(self.output_remaining) as usize);
+            let active = std::mem::replace(&mut self.active, ActiveChunk::None);
+            match active {
+                ActiveChunk::Raw(mut remaining) => {
+                    let amount = buf.len().min(remaining.min(self.output_remaining) as usize);
                     if amount == 0 {
-                        self.active = ActiveChunk::None;
                         continue;
                     }
                     let count = self.file.read(&mut buf[..amount])?;
                     if count == 0 {
                         return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "truncated RAW sparse chunk"));
                     }
-                    *remaining -= count as u64;
+                    remaining -= count as u64;
                     self.output_remaining -= count as u64;
-                    if *remaining == 0 {
-                        self.active = ActiveChunk::None;
+                    if remaining > 0 {
+                        self.active = ActiveChunk::Raw(remaining);
                     }
                     return Ok(count);
                 }
-                ActiveChunk::Fill { pattern, offset, remaining } => {
-                    let amount = buf.len().min((*remaining).min(self.output_remaining) as usize);
+                ActiveChunk::Fill { pattern, mut offset, mut remaining } => {
+                    let amount = buf.len().min(remaining.min(self.output_remaining) as usize);
                     if amount == 0 {
-                        self.active = ActiveChunk::None;
                         continue;
                     }
                     for (i, byte) in buf[..amount].iter_mut().enumerate() {
-                        *byte = pattern[(*offset + i) % 4];
+                        *byte = pattern[(offset + i) % 4];
                     }
-                    *offset = (*offset + amount) % 4;
-                    *remaining -= amount as u64;
+                    offset = (offset + amount) % 4;
+                    remaining -= amount as u64;
                     self.output_remaining -= amount as u64;
-                    if *remaining == 0 {
-                        self.active = ActiveChunk::None;
+                    if remaining > 0 {
+                        self.active = ActiveChunk::Fill { pattern, offset, remaining };
                     }
                     return Ok(amount);
                 }
-                ActiveChunk::Zero(remaining) => {
-                    let amount = buf.len().min((*remaining).min(self.output_remaining) as usize);
+                ActiveChunk::Zero(mut remaining) => {
+                    let amount = buf.len().min(remaining.min(self.output_remaining) as usize);
                     if amount == 0 {
-                        self.active = ActiveChunk::None;
                         continue;
                     }
                     buf[..amount].fill(0);
-                    *remaining -= amount as u64;
+                    remaining -= amount as u64;
                     self.output_remaining -= amount as u64;
-                    if *remaining == 0 {
-                        self.active = ActiveChunk::None;
+                    if remaining > 0 {
+                        self.active = ActiveChunk::Zero(remaining);
                     }
                     return Ok(amount);
                 }
@@ -213,7 +211,6 @@ impl Read for SparseReader {
                             let mut crc = [0u8; 4];
                             self.file.read_exact(&mut crc)?;
                             // CRC chunks carry metadata only; the full file structure was preflighted.
-                            continue;
                         }
                         _ => return Err(io::Error::new(io::ErrorKind::InvalidData, "unsupported sparse chunk type")),
                     }
