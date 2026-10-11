@@ -6,7 +6,7 @@ use log::debug;
 use memchr::memmem;
 
 use crate::activity::Activity;
-use crate::da::protocol::SPARSE_TIMEOUT;
+use crate::da::protocol::{SPARSE_TIMEOUT, SUPER_TIMEOUT};
 use crate::da::xml::structs::{PartitionChangedStatus, ProtectedRecord};
 use crate::da::xml::{
     CMD_DOWNLOAD_FILE,
@@ -185,14 +185,29 @@ where
                 xml.process_file_sys_op(port, &resp, op)?;
             }
             CMD_DOWNLOAD_FILE => {
+                // The super partition is exceptionally large and can take several
+                // minutes to finish processing on the device. Keep the longer
+                // timeout scoped to this partition only.
+                let timeout = if part_name.eq_ignore_ascii_case("super") {
+                    SUPER_TIMEOUT
+                } else {
+                    MAX_TIMEOUT
+                };
+
                 xml.process_download_data(
                     port,
                     &resp,
                     size,
-                    MAX_TIMEOUT,
+                    timeout,
                     &mut reader,
                     &mut progress,
                 )?;
+
+                if part_name.eq_ignore_ascii_case("super") {
+                    // process_download_data restores the minimum timeout after
+                    // transfer; the DA may still need time before its next response.
+                    port.set_timeout(MAX_TIMEOUT)?;
+                }
             }
             _ => return Err(XmlErrorKind::UnsupportedCmd.into()),
         }
