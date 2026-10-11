@@ -46,7 +46,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install --yes pkg-config libudev-dev libusb-1.0-0-dev
 
-      - name: Install Rust stable
+      - name: Install Rust nightly
         uses: dtolnay/rust-toolchain@nightly
 
       - name: Cache Rust build
@@ -69,7 +69,7 @@ jobs:
           if (!(Test-Path "target/nightly/antumbra.exe")) {
             throw "Antumbra executable was not produced by the build."
           }
-          Copy-Item "target/release/antumbra.exe" "${{ matrix.asset }}"
+          Copy-Item "target/nightly/antumbra.exe" "${{ matrix.asset }}"
 
       - name: Upload direct executable
         uses: actions/upload-artifact@v4
