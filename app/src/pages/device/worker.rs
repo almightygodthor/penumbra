@@ -225,12 +225,17 @@ fn run_worker(
 
                 match result {
                     Err(e) => {
+                        let reboot_action = action.label().starts_with("Reboot to ");
                         let lost = !params.device_present();
-                        let _ = event_tx.send(DeviceEvent::Error(e.to_string()));
+                        let _ = event_tx.send(DeviceEvent::Error(if reboot_action {
+                            format!("{} failed: {e}. The DA session may be stale; disconnect and reconnect before trying another operation.", action.label())
+                        } else {
+                            e.to_string()
+                        }));
 
-                        if lost {
-                            let _ = event_tx
-                                .send(DeviceEvent::StatusChanged(DeviceStatus::Disconnected));
+                        // USB presence alone does not prove that the DA protocol is alive.
+                        if lost || reboot_action {
+                            let _ = event_tx.send(DeviceEvent::StatusChanged(DeviceStatus::Disconnected));
                             break;
                         }
                     }
@@ -242,6 +247,12 @@ fn run_worker(
                         partitions = dev.partitions();
 
                         let _ = event_tx.send(DeviceEvent::PartitionsChanged(partitions.clone()));
+                    }
+                    Ok(_) if action.label().starts_with("Reboot to ") => {
+                        log::info!("{} command accepted; ending the current DA session.", action.label());
+                        let _ = event_tx.send(DeviceEvent::StatusChanged(DeviceStatus::Disconnected));
+                        let _ = event_tx.send(DeviceEvent::ActionFinished);
+                        break;
                     }
                     Ok(_) => {}
                 }
