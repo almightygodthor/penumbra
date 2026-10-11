@@ -50,7 +50,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $url = "https://zadig.akeo.ie/downloads/zadig-2.9.exe"
+          $url = "https://github.com/pbatard/libwdi/releases/download/v1.5.1/zadig-2.9.exe"
           Invoke-WebRequest -Uri $url -OutFile "$env:RUNNER_TEMP\zadig.exe"
           if (!(Test-Path "$env:RUNNER_TEMP\zadig.exe") -or (Get-Item "$env:RUNNER_TEMP\zadig.exe").Length -lt 100000) {
             throw "Official Zadig download is missing or unexpectedly small."
