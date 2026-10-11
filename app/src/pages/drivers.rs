@@ -132,16 +132,28 @@ $result = foreach ($d in $devices) {
     fn open_zadig(&mut self) {
         #[cfg(target_os = "windows")]
         {
-            let candidates = Self::app_directory()
-                .map(|dir| vec![dir.join("zadig.exe"), dir.join("tools").join("zadig.exe")])
-                .unwrap_or_default();
-            if let Some(path) = candidates.into_iter().find(|path| path.is_file()) {
-                match Command::new(path).spawn() {
-                    Ok(_) => self.message = "Zadig launched. Select the exact MediaTek USB device and choose WinUSB; double-check the device before applying.".into(),
-                    Err(error) => self.message = format!("Could not launch Zadig: {error}"),
-                }
-            } else {
-                self.message = "Zadig is not bundled with this build yet. No driver was changed. Place the licensed Zadig executable beside Antumbra or in tools/zadig.exe.".into();
+            const ZADIG_BYTES: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/zadig.exe"));
+            if ZADIG_BYTES.is_empty() {
+                self.message = "This build does not contain Zadig. Use the official Windows stable release build.".into();
+                return;
+            }
+
+            let Some(temp_dir) = std::env::var_os("TEMP").map(PathBuf::from) else {
+                self.message = "Windows TEMP directory could not be found.".into();
+                return;
+            };
+            let app_temp = temp_dir.join("Antumbra");
+            let path = app_temp.join("zadig.exe");
+            if let Err(error) = std::fs::create_dir_all(&app_temp)
+                .and_then(|_| std::fs::write(&path, ZADIG_BYTES))
+            {
+                self.message = format!("Could not extract embedded Zadig: {error}");
+                return;
+            }
+
+            match Command::new(path).spawn() {
+                Ok(_) => self.message = "Zadig launched. Verify the selected MediaTek USB device and choose WinUSB only if appropriate. Driver changes require your confirmation.".into(),
+                Err(error) => self.message = format!("Could not launch Zadig: {error}"),
             }
         }
 
@@ -151,15 +163,6 @@ $result = foreach ($d in $devices) {
         }
     }
 
-    #[cfg(target_os = "windows")]
-    fn app_directory() -> Option<PathBuf> {
-        std::env::current_exe().ok()?.parent().map(PathBuf::from)
-    }
-
-    #[cfg(not(target_os = "windows"))]
-    fn app_directory() -> Option<PathBuf> {
-        None
-    }
 }
 
 impl Page for DriversPage {
