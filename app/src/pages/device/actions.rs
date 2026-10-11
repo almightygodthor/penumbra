@@ -585,7 +585,12 @@ impl FlashScatter {
                 "Writing scatter entry '{}' via WritePartition: image='{}', partition_size=0x{:X}, expanded_image_size=0x{:X}, sparse={}",
                 item.name, path.display(), partition.size, size, sparse
             );
-            io.status(format!("Writing {}...", item.name));
+            io.status(format!(
+                "Writing {} (image {:.1} GiB; scatter total {:.1} GiB)...",
+                item.name,
+                *size as f64 / 1_073_741_824.0,
+                total_bytes as f64 / 1_073_741_824.0,
+            ));
 
             let name = item.name.clone();
             let progress = reporter.clone();
