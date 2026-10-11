@@ -167,64 +167,49 @@ $result = foreach ($d in $devices) {
 
 impl Page for DriversPage {
     fn render(&mut self, frame: &mut Frame<'_>, ctx: &mut AppCtx) {
-        let [header, summary, devices, message, footer] = Layout::vertical([
+        let [title, body, footer] = Layout::vertical([
             Constraint::Length(3),
-            Constraint::Length(5),
             Constraint::Min(5),
-            Constraint::Length(3),
             Constraint::Length(2),
         ]).areas(frame.area());
 
-        let accent = ctx.theme.style_accent();
         frame.render_widget(
-            Paragraph::new(Line::from(vec![
-                Span::styled(" USB DRIVER MANAGER ", Style::default().fg(ctx.theme.success).add_modifier(Modifier::BOLD)),
-                Span::styled(" / WINDOWS USB DIAGNOSTICS", ctx.theme.style_muted()),
-            ]))
-            .block(Block::default().borders(Borders::ALL).border_style(accent)),
-            header,
+            Paragraph::new(" USB DRIVER MANAGER ")
+                .style(ctx.theme.style_accent())
+                .block(Block::default().borders(Borders::ALL).border_style(ctx.theme.style_accent())),
+            title,
         );
 
-        let winusb_label = if self.status.winusb_available { "AVAILABLE" } else { "NOT FOUND / CHECK FAILED" };
-        let winusb_color = if self.status.winusb_available { ctx.theme.success } else { ctx.theme.error };
-        let summary_lines = vec![
-            Line::from(vec![
-                Span::styled("WINUSB COMPONENT  ", ctx.theme.style_muted()),
-                Span::styled(winusb_label, Style::default().fg(winusb_color).add_modifier(Modifier::BOLD)),
-            ]),
-            Line::from(vec![
-                Span::styled("MEDIATEK DEVICES   ", ctx.theme.style_muted()),
-                Span::styled(self.status.connected_mediatek.len().to_string(), Style::default().fg(ctx.theme.text).add_modifier(Modifier::BOLD)),
-                Span::raw(" detected"),
-                Span::raw("     "),
-                Span::styled("WINUSB-BOUND   ", ctx.theme.style_muted()),
-                Span::styled(self.status.connected_winusb.len().to_string(), Style::default().fg(if self.status.connected_winusb.is_empty() { ctx.theme.warning } else { ctx.theme.success }).add_modifier(Modifier::BOLD)),
-            ]),
-            Line::from(Span::styled(
-                "The Windows component can exist even when no phone is connected or bound to WinUSB.",
-                ctx.theme.style_muted(),
-            )),
-        ];
-        frame.render_widget(
-            Paragraph::new(Text::from(summary_lines)).wrap(Wrap { trim: true })
-                .block(Block::default().borders(Borders::ALL).title(" System status ").border_style(accent)),
-            summary,
-        );
+        let status_label = if self.status.winusb_available {
+            "WinUSB installed"
+        } else {
+            "WinUSB not installed"
+        };
+        let status_color = if self.status.winusb_available {
+            ctx.theme.success
+        } else {
+            ctx.theme.warning
+        };
 
-        let mut device_lines = vec![
-            Line::from(Span::styled("CONNECTED MEDIATEK USB DEVICES", Style::default().fg(ctx.theme.success).add_modifier(Modifier::BOLD))),
+        let mut lines = vec![
+            Line::from(vec![
+                Span::styled("Driver status: ", ctx.theme.style_muted()),
+                Span::styled(status_label, Style::default().fg(status_color).add_modifier(Modifier::BOLD)),
+            ]),
             Line::from(""),
         ];
+
         if self.status.connected_mediatek.is_empty() {
-            device_lines.push(Line::from(Span::styled("  ! No matching device detected", Style::default().fg(ctx.theme.warning).add_modifier(Modifier::BOLD))));
-            device_lines.push(Line::from(Span::styled("  Connect the phone in Preloader/BROM or the required USB mode, then press R to rescan.", ctx.theme.style_muted())));
+            lines.push(Line::from(Span::styled("No MediaTek USB device detected.", ctx.theme.style_muted())));
+            lines.push(Line::from(Span::styled("Connect the phone in Preloader/BROM mode and press R to rescan.", ctx.theme.style_muted())));
         } else {
+            lines.push(Line::from(Span::styled("Connected MediaTek devices:", ctx.theme.style_accent())));
             for device in &self.status.connected_mediatek {
                 let using_winusb = self.status.connected_winusb.iter().any(|item| item == device);
-                device_lines.push(Line::from(vec![
-                    Span::styled(if using_winusb { "  [OK] " } else { "  [!]  " }, Style::default().fg(if using_winusb { ctx.theme.success } else { ctx.theme.warning }).add_modifier(Modifier::BOLD)),
+                lines.push(Line::from(vec![
+                    Span::raw("  • "),
                     Span::styled(device.clone(), Style::default().fg(ctx.theme.text)),
-                    Span::raw("  "),
+                    Span::raw(" — "),
                     Span::styled(
                         if using_winusb { "WinUSB bound" } else { "WinUSB not bound" },
                         Style::default().fg(if using_winusb { ctx.theme.success } else { ctx.theme.warning }),
@@ -232,30 +217,25 @@ impl Page for DriversPage {
                 ]));
             }
         }
+
         if !self.status.details.is_empty() {
-            device_lines.push(Line::from(""));
-            device_lines.push(Line::from(Span::styled(self.status.details.clone(), Style::default().fg(ctx.theme.error))));
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled(self.status.details.clone(), Style::default().fg(ctx.theme.error))));
         }
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(self.message.as_str(), ctx.theme.style_muted())));
+
         frame.render_widget(
-            Paragraph::new(Text::from(device_lines)).wrap(Wrap { trim: true })
-                .block(Block::default().borders(Borders::ALL).title(" Device detection ").border_style(accent)),
-            devices,
+            Paragraph::new(Text::from(lines))
+                .wrap(Wrap { trim: true })
+                .block(Block::default().borders(Borders::ALL).title(" Status ")),
+            body,
         );
 
         frame.render_widget(
-            Paragraph::new(Line::from(vec![
-                Span::styled("STATUS  ", ctx.theme.style_muted()),
-                Span::styled(self.message.as_str(), Style::default().fg(ctx.theme.text)),
-            ]))
-            .wrap(Wrap { trim: true })
-            .block(Block::default().borders(Borders::ALL).title(" Guidance ")),
-            message,
-        );
-
-        frame.render_widget(
-            Paragraph::new(" [R] Rescan     [I] Open Zadig     [Esc] Back ")
+            Paragraph::new("[R] Rescan   [I] Install / Reinstall via Zadig   [Esc] Back")
                 .alignment(Alignment::Center)
-                .style(Style::default().fg(ctx.theme.success).add_modifier(Modifier::BOLD)),
+                .style(ctx.theme.style_muted()),
             footer,
         );
     }
