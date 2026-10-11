@@ -19,6 +19,7 @@ import time
 import threading
 import zipfile
 import io
+import calendar
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -190,7 +191,7 @@ def monitor_build(chat_id, message_id, tag, started_at, changelog):
                 data = gh('GET', f'/repos/{REPO}/actions/workflows/{RELEASE_WORKFLOW_FILE}/runs?branch={urllib.parse.quote(BRANCH)}&event=workflow_dispatch&per_page=10')
                 candidates = []
                 for item in data.get('workflow_runs', []):
-                    try: created = time.mktime(time.strptime(item.get('created_at', ''), '%Y-%m-%dT%H:%M:%SZ'))
+                    try: created = calendar.timegm(time.strptime(item.get('created_at', ''), '%Y-%m-%dT%H:%M:%SZ'))
                     except Exception: continue
                     if created >= started_at - 10: candidates.append(item)
                 if candidates: run = max(candidates, key=lambda x: x.get('id', 0))
