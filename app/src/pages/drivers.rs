@@ -151,9 +151,34 @@ $result = foreach ($d in $devices) {
                 return;
             }
 
-            match Command::new(path).spawn() {
-                Ok(_) => self.message = "Zadig launched. Verify the selected MediaTek USB device and choose WinUSB only if appropriate. Driver changes require your confirmation.".into(),
-                Err(error) => self.message = format!("Could not launch Zadig: {error}"),
+            // Zadig needs administrator privileges to install or replace a USB driver.
+            // Use ShellExecute's "runas" verb via PowerShell so Windows displays the
+            // normal UAC consent prompt instead of returning ERROR_ELEVATION_REQUIRED.
+            let escaped_path = path.to_string_lossy().replace(''', "''");
+            let command = format!("Start-Process -FilePath '{escaped_path}' -Verb RunAs");
+            match Command::new("powershell.exe")
+                .args([
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-Command",
+                    &command,
+                ])
+                .output()
+            {
+                Ok(output) if output.status.success() => {
+                    self.message = "Zadig launch requested. Approve the Windows UAC prompt, then verify the selected MediaTek USB device. Driver changes require your confirmation.".into();
+                }
+                Ok(output) => {
+                    let error = String::from_utf8_lossy(&output.stderr).trim().to_string();
+                    self.message = if error.is_empty() {
+                        format!("Windows could not start Zadig (PowerShell exit {}).", output.status)
+                    } else {
+                        format!("Could not launch elevated Zadig: {error}")
+                    };
+                }
+                Err(error) => self.message = format!("Could not request administrator access for Zadig: {error}"),
             }
         }
 
