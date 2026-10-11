@@ -116,6 +116,10 @@ def confirm_keyboard():
     ]
 
 
+def progress_bar(percent, width=12):
+    filled = max(0, min(width, int(percent * width / 100)))
+    return '[' + '█' * filled + '░' * (width - filled) + '] ' + str(percent) + '%'
+
 def allowed(chat_id, user_id):
     return str(chat_id) == ALLOWED_CHAT and (not ALLOWED_USER or str(user_id) == ALLOWED_USER)
 
@@ -296,6 +300,18 @@ def handle_callback(query):
             edit(chat_id, message_id, "Release cancelled.", home_keyboard())
         elif data == "release:edit":
             start_release(chat_id, message_id)
+        elif data == "release:edit_failed":
+            previous = SESSIONS.get(str(chat_id), {}).get("changelog", "")
+            start_release(chat_id, message_id)
+            SESSIONS[str(chat_id)]["previous_changelog"] = previous
+            edit(chat_id, message_id, "Send your revised changelog. Your previous changelog is retained for reference in this session; the new text will replace it.", cancel_keyboard())
+        elif data == "release:retry":
+            session = SESSIONS.get(str(chat_id), {})
+            if session.get("state") != "failed" or not session.get("changelog"):
+                edit(chat_id, message_id, "No failed release is available to retry. Start a new release.", home_keyboard())
+                return
+            edit(chat_id, message_id, "Retrying with the same changelog…", [])
+            publish_release(chat_id, message_id, session["changelog"])
         elif data == "release:publish":
             session = SESSIONS.get(str(chat_id))
             if not session or session.get("state") != "confirm" or not session.get("changelog", "").strip():
