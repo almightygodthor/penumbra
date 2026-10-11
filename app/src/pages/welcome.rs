@@ -111,9 +111,9 @@ impl Page for WelcomePage {
                         Span::styled("Driver status: ", ctx.theme.style_muted()),
                         Span::styled(
                             if cfg!(target_os = "windows") && std::path::Path::new(r"C:\Windows\System32\drivers\WinUSB.sys").exists() {
-                                "WinUSB component AVAILABLE"
+                                "WinUSB installed"
                             } else if cfg!(target_os = "windows") {
-                                "WinUSB component NOT FOUND"
+                                "WinUSB not installed"
                             } else {
                                 "Windows-only check"
                             },
