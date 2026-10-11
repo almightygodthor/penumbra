@@ -18,7 +18,7 @@ use crate::cli::CliArgs;
 use crate::components::dialog::{Dialog, DialogBuilder};
 use crate::components::{Component, RectExt};
 use crate::config::AntumbraConfig;
-use crate::pages::{DevicePage, OptionsPage, Page, WelcomePage};
+use crate::pages::{DevicePage, DriversPage, OptionsPage, Page, WelcomePage};
 use crate::themes::{Theme, load_themes};
 
 pub enum AppEvent {
@@ -33,6 +33,7 @@ pub enum AppPage {
     Welcome,
     DevicePage,
     Options,
+    Drivers,
 }
 
 pub struct AppCtx {
@@ -234,6 +235,7 @@ impl App {
             AppPage::Welcome => Box::new(WelcomePage::new()),
             AppPage::DevicePage => Box::new(DevicePage::new()),
             AppPage::Options => Box::new(OptionsPage::new()),
+            AppPage::Drivers => Box::new(DriversPage::new()),
         };
 
         self.current_page = new_page;
