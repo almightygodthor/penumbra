@@ -240,13 +240,27 @@ fn run_worker(
                         }
                     }
                     Ok(true) if action.changes_layout() => {
-                        // If the action changed the layout, we need to rebuild the
-                        // partition list to match the device, or we risk using
-                        // stale data.
-                        dev.devinfo().set_partitions(vec![]);
-                        partitions = dev.partitions();
-
-                        let _ = event_tx.send(DeviceEvent::PartitionsChanged(partitions.clone()));
+                        // Rebuild the DA protocol state after a successful partition write/erase.
+                        // Large writes can leave the current session stale even while USB remains visible.
+                        let devinfo = dev.devinfo().data();
+                        match dev.reinit(devinfo) {
+                            Ok(()) => {
+                                dev.devinfo().set_partitions(vec![]);
+                                partitions = dev.partitions();
+                                let _ = event_tx.send(DeviceEvent::PartitionsChanged(partitions.clone()));
+                                log::info!("DA protocol reinitialized after '{}'.", action.label());
+                            }
+                            Err(error) => {
+                                log::error!("DA session recovery failed after '{}': {error:#}", action.label());
+                                let _ = event_tx.send(DeviceEvent::Error(format!(
+                                    "{} completed, but the DA session could not be recovered: {}. Disconnect and reconnect before another operation.",
+                                    action.label(), error
+                                )));
+                                let _ = event_tx.send(DeviceEvent::StatusChanged(DeviceStatus::Disconnected));
+                                let _ = event_tx.send(DeviceEvent::ActionFinished);
+                                break;
+                            }
+                        }
                     }
                     Ok(_) if action.label().starts_with("Reboot to ") => {
                         log::info!("{} command accepted; ending the current DA session.", action.label());
