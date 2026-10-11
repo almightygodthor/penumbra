@@ -257,11 +257,29 @@ fn run_worker(
                     // stop responding after large writes; report that state explicitly
                     // rather than silently treating the old session as fully healthy.
                     Ok(true) => {
-                        log::info!("Scatter flash finished; refreshing partition information.");
-                        dev.devinfo().set_partitions(vec![]);
-                        partitions = dev.partitions();
-                        let _ = event_tx.send(DeviceEvent::PartitionsChanged(partitions.clone()));
-                        log::info!("Partition refresh completed after scatter flash.");
+                        log::info!("Scatter flash finished; reinitializing the DA protocol before the next action.");
+
+                        // A successful large write can leave the DA protocol object out of sync.
+                        // Recreate the protocol using the already-established device information;
+                        // do not issue an automatic reboot or repeat any flash operation.
+                        let devinfo = dev.devinfo().data();
+                        match dev.reinit(devinfo) {
+                            Ok(()) => {
+                                dev.devinfo().set_partitions(vec![]);
+                                partitions = dev.partitions();
+                                let _ = event_tx.send(DeviceEvent::PartitionsChanged(partitions.clone()));
+                                log::info!("DA protocol reinitialized and partition information refreshed.");
+                            }
+                            Err(error) => {
+                                log::error!("DA session recovery failed after scatter flash: {error:#}");
+                                let _ = event_tx.send(DeviceEvent::Error(format!(
+                                    "Scatter flash completed, but the DA session could not be recovered: {error}. Disconnect and reconnect the device before another operation."
+                                )));
+                                let _ = event_tx.send(DeviceEvent::StatusChanged(DeviceStatus::Disconnected));
+                                let _ = event_tx.send(DeviceEvent::ActionFinished);
+                                break;
+                            }
+                        }
                     }
                     Ok(false) => {}
                     Err(e) => { let _ = event_tx.send(DeviceEvent::Error(e.to_string())); }
