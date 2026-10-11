@@ -57,14 +57,27 @@ jobs:
           }
           "ZADIG_PATH=$env:RUNNER_TEMP\zadig.exe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
+      - name: Install Rust nightly (explicit Windows MSVC target)
+        if: runner.os == 'Windows'
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          targets: x86_64-pc-windows-msvc
+
       - name: Install Rust nightly
+        if: runner.os != 'Windows'
         uses: dtolnay/rust-toolchain@nightly
 
       - name: Cache Rust build
         uses: Swatinem/rust-cache@v2
 
       - name: Build Antumbra
-        run: cargo build --profile nightly --package antumbra
+        shell: bash
+        env:
+          RUST_BACKTRACE: "1"
+        run: |
+          rustc --version --verbose
+          cargo --version
+          cargo build --locked --verbose --profile nightly --package antumbra
 
       - name: Stage Linux executable
         if: runner.os == 'Linux'
@@ -81,6 +94,17 @@ jobs:
             throw "Antumbra executable was not produced by the build."
           }
           Copy-Item "target/nightly/antumbra.exe" "${{ matrix.asset }}"
+
+      - name: Upload build diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: antumbra-build-diagnostics
+          path: |
+            target/nightly
+            ${{ runner.temp }}/zadig.exe
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Upload direct executable
         uses: actions/upload-artifact@v4
