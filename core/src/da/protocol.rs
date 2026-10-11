@@ -28,6 +28,8 @@ pub const NOOP_PROGRESS: fn(u64, u64) = |_, _| {};
 // even with the generous timeout of 10s. To account for this, a longer timeout can help the
 // unnecessary failures.
 pub const SPARSE_TIMEOUT: Duration = Duration::from_mins(5);
+/// Longer I/O timeout for the large Android super partition.
+pub const SUPER_TIMEOUT: Duration = Duration::from_mins(5);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, SchemaRead, SchemaWrite)]
 #[repr(u32)]
