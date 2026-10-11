@@ -181,6 +181,44 @@ def publish_release(chat_id, message_id, changelog):
     print(f"Queued Antumbra stable build for {REPO} {tag}", flush=True)
 
 
+def fetch_job_logs(job_id):
+    """Download Actions logs without forwarding GitHub credentials to signed storage URLs."""
+    url = f"{GH_API}/repos/{REPO}/actions/jobs/{job_id}/logs"
+    headers = {
+        "Authorization": f"Bearer {GH_TOKEN}",
+        "Accept": "application/vnd.github+json",
+        "User-Agent": "Penumbra-Stable-Release-Bot",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+
+    # GitHub returns a short-lived redirect to object storage. Follow it manually
+    # so the GitHub Authorization header is never sent to the storage host.
+    class NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, response_headers, new_url):
+            return None
+
+    opener = urllib.request.build_opener(NoRedirect)
+    req = urllib.request.Request(url, headers=headers)
+    try:
+        with opener.open(req, timeout=25) as response:
+            return response.read()
+    except urllib.error.HTTPError as exc:
+        if exc.code not in (301, 302, 303, 307, 308):
+            detail = exc.read().decode("utf-8", errors="replace")
+            raise APIError(f"GitHub log endpoint returned HTTP {exc.code}: {detail[:250]}") from exc
+        location = exc.headers.get("Location")
+        if not location:
+            raise APIError("GitHub log endpoint returned a redirect without a Location header.")
+    # The redirect URL contains its own short-lived signature; do not attach GH_TOKEN.
+    storage_req = urllib.request.Request(location, headers={"User-Agent": "Penumbra-Stable-Release-Bot"})
+    try:
+        with urllib.request.urlopen(storage_req, timeout=45) as response:
+            return response.read()
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        raise APIError(f"Log storage returned HTTP {exc.code}: {detail[:250]}") from exc
+
+
 def monitor_build(chat_id, message_id, tag, started_at, changelog):
     chat_key = str(chat_id)
     run = None
@@ -212,8 +250,7 @@ def monitor_build(chat_id, message_id, tag, started_at, changelog):
                 for job in failed[:2]:
                     report += f'\nFailed job: {job.get("name")}\n'
                     try:
-                        req = urllib.request.Request(f'{GH_API}/repos/{REPO}/actions/jobs/{job["id"]}/logs', headers={'Authorization':f'Bearer {GH_TOKEN}','Accept':'application/vnd.github+json','User-Agent':'Penumbra-Stable-Release-Bot'})
-                        with urllib.request.urlopen(req, timeout=25) as response: raw = response.read()
+                        raw = fetch_job_logs(job["id"])
                         with zipfile.ZipFile(io.BytesIO(raw)) as zf:
                             logs = '\n'.join(zf.read(n).decode('utf-8', errors='replace') for n in zf.namelist() if n.endswith('.txt'))
                         report += logs[-1200:] + '\n'
