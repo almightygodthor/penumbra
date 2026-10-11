@@ -1,0 +1,128 @@
+name: Build Antumbra and Publish Stable Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Stable semantic version tag (for example v2.0.1)
+        required: true
+        type: string
+      changelog:
+        description: Exact release notes provided through Telegram
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: antumbra-stable-release-${{ inputs.release_tag }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build Antumbra (${{ matrix.platform }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: Linux x86_64
+            runner: ubuntu-latest
+            asset: antumbra-linux-x86_64
+          - platform: Windows x86_64
+            runner: windows-latest
+            asset: antumbra-windows-x86_64.exe
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Install Linux native dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes pkg-config libudev-dev libusb-1.0-0-dev
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build Antumbra
+        run: cargo build --release --package antumbra
+
+      - name: Stage Linux executable
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          test -f target/release/antumbra
+          install -m 0755 target/release/antumbra "${{ matrix.asset }}"
+
+      - name: Stage Windows executable
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if (!(Test-Path "target/release/antumbra.exe")) {
+            throw "Antumbra executable was not produced by the build."
+          }
+          Copy-Item "target/release/antumbra.exe" "${{ matrix.asset }}"
+
+      - name: Upload direct executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: ${{ matrix.asset }}
+          if-no-files-found: error
+          retention-days: 3
+
+  publish:
+    name: Publish stable GitHub release
+    runs-on: ubuntu-latest
+    needs: build
+    timeout-minutes: 10
+    steps:
+      - name: Download Linux executable
+        uses: actions/download-artifact@v4
+        with:
+          name: antumbra-linux-x86_64
+          path: assets/linux
+
+      - name: Download Windows executable
+        uses: actions/download-artifact@v4
+        with:
+          name: antumbra-windows-x86_64.exe
+          path: assets/windows
+
+      - name: Validate assets and tag
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          [[ "$RELEASE_TAG" =~ ^v?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || {
+            echo "Invalid stable semantic version tag: $RELEASE_TAG" >&2
+            exit 1
+          }
+          test -s assets/linux/antumbra-linux-x86_64
+          test -s assets/windows/antumbra-windows-x86_64.exe
+
+      - name: Create release and upload executable assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          RELEASE_NOTES: ${{ inputs.changelog }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s\n' "$RELEASE_NOTES" > "$RUNNER_TEMP/release-notes.md"
+          # This job depends on both build jobs. A failed build prevents this step
+          # and therefore no GitHub release is created.
+          gh release create "$RELEASE_TAG" \
+            assets/linux/antumbra-linux-x86_64#Antumbra-Linux-x86_64 \
+            assets/windows/antumbra-windows-x86_64.exe#Antumbra-Windows-x86_64.exe \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Penumbra $RELEASE_TAG" \
+            --notes-file "$RUNNER_TEMP/release-notes.md" \
+            --target main
