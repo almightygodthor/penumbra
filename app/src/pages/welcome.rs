@@ -19,6 +19,7 @@ use crate::pages::{LOGO, LOGO_ASCII, Page};
 pub enum MenuAction {
     EnterDaMode,
     Options,
+    Drivers,
     Quit,
 }
 
@@ -32,6 +33,7 @@ impl WelcomePage {
         let menu = description_menu![
             ('*', "Enter DA Mode", "Connect to the device:\n1. Power off device.\n2. Hold both volume buttons together.\n3. Connect to your PC." => MenuAction::EnterDaMode),
             ('*', "Options", "Configure Antumbra settings." => MenuAction::Options),
+            ('*', "USB Driver Manager", "Check WinUSB status and open Zadig for installation or reinstall." => MenuAction::Drivers),
             ('*', "Quit", "Exit Antumbra." => MenuAction::Quit),
         ];
 
@@ -45,6 +47,9 @@ impl WelcomePage {
             }
             Some(MenuAction::Options) => {
                 ctx.change_page(AppPage::Options);
+            }
+            Some(MenuAction::Drivers) => {
+                ctx.change_page(AppPage::Drivers);
             }
             Some(MenuAction::Quit) => ctx.quit(),
             None => {}
@@ -78,7 +83,7 @@ impl Page for WelcomePage {
                     Constraint::Fill(1),
                     Constraint::Length(8), // Logo
                     Constraint::Length(1),
-                    Constraint::Length(7), // Menu
+                    Constraint::Length(9), // Menu
                     Constraint::Length(1),
                     Constraint::Length(3), // Device support and bundled files
                     Constraint::Fill(1),
@@ -90,7 +95,7 @@ impl Page for WelcomePage {
                     .style(ctx.theme.style_accent());
                 Widget::render(logo, logo_block, buf);
 
-                let menu_area = menu_block.centered_fixed(80, 7);
+                let menu_area = menu_block.centered_fixed(80, 9);
                 self.menu.render(menu_area, buf, &ctx.theme);
 
                 let files_indicator = Paragraph::new(vec![
