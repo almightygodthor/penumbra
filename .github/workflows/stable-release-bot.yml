@@ -1,0 +1,34 @@
+name: Telegram Stable Release Bot
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Backup start in case a chained worker could not be queued.
+    - cron: "17 */5 * * *"
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: penumbra-stable-release-telegram-bot
+  cancel-in-progress: false
+
+jobs:
+  telegram-bot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Start private Telegram release bot
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_USER_ID: ${{ secrets.TELEGRAM_USER_ID }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_BOT_GITHUB_TOKEN: ${{ secrets.RELEASE_BOT_GITHUB_TOKEN }}
+          RELEASE_REPOSITORY: almightygodthor/penumbra
+          RELEASE_BRANCH: main
+        run: python3 bot/stable_release_bot.py
