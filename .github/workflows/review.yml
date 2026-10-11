@@ -5,14 +5,16 @@ on:
     paths:
       - "**.rs"
       - "**.toml"
-      - "!docs/**"      - ".github/workflows/**"
+      - "!docs/**"
+      - ".github/workflows/**"
 
   pull_request:
     branches: [main]
     paths:
       - "**.rs"
       - "**.toml"
-      - "!docs/**"      - ".github/workflows/**"
+      - "!docs/**"
+      - ".github/workflows/**"
 
   workflow_dispatch:
 
