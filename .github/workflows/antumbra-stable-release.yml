@@ -36,7 +36,7 @@ jobs:
     timeout-minutes: 45
     steps:
       - name: Checkout source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: main
 
@@ -47,26 +47,26 @@ jobs:
           sudo apt-get install --yes pkg-config libudev-dev libusb-1.0-0-dev
 
       - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@nightly
 
       - name: Cache Rust build
         uses: Swatinem/rust-cache@v2
 
       - name: Build Antumbra
-        run: cargo build --release --package antumbra
+        run: cargo build --profile nightly --package antumbra
 
       - name: Stage Linux executable
         if: runner.os == 'Linux'
         shell: bash
         run: |
-          test -f target/release/antumbra
-          install -m 0755 target/release/antumbra "${{ matrix.asset }}"
+          test -f target/nightly/antumbra
+          install -m 0755 target/nightly/antumbra "${{ matrix.asset }}"
 
       - name: Stage Windows executable
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          if (!(Test-Path "target/release/antumbra.exe")) {
+          if (!(Test-Path "target/nightly/antumbra.exe")) {
             throw "Antumbra executable was not produced by the build."
           }
           Copy-Item "target/release/antumbra.exe" "${{ matrix.asset }}"
