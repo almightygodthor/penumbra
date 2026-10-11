@@ -252,13 +252,16 @@ fn run_worker(
                 let io = DeviceIo::new(&event_tx, &cmd_rx, &partitions, &activity);
                 let result = super::actions::FlashScatter.run_prepared(&mut dev, &io, &scatter, &selected_names);
                 match result {
-                    // Scatter flashing can leave the device in a state where it
-                    // disconnects or no longer answers DA commands. Do not issue a
-                    // second partition-info request immediately after a successful
-                    // flash: the flash operation has already completed, and this
-                    // refresh can produce misleading handshake errors.
+                    // Refresh the partition cache after a successful scatter write so
+                    // the next action does not reuse stale layout information. Some DAs
+                    // stop responding after large writes; report that state explicitly
+                    // rather than silently treating the old session as fully healthy.
                     Ok(true) => {
-                        log::info!("Scatter flash finished; skipping immediate partition refresh.");
+                        log::info!("Scatter flash finished; refreshing partition information.");
+                        dev.devinfo().set_partitions(vec![]);
+                        partitions = dev.partitions();
+                        let _ = event_tx.send(DeviceEvent::PartitionsChanged(partitions.clone()));
+                        log::info!("Partition refresh completed after scatter flash.");
                     }
                     Ok(false) => {}
                     Err(e) => { let _ = event_tx.send(DeviceEvent::Error(e.to_string())); }
