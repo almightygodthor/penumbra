@@ -268,15 +268,19 @@ def handle_message(message):
     try:
         tag = next_stable_tag()
     except Exception as exc:
-        send(chat_id, f"Could not determine next version: {exc}\nNo release has been created.")
+        edit(chat_id, session["message_id"],
+             f"Could not determine next version: {exc}\nNo release has been created.",
+             home_keyboard())
         SESSIONS.pop(str(chat_id), None)
         return
-    # Plain text is used deliberately: user-supplied changelog is never parsed as HTML.
-    preview = text[:3000] + ("…" if len(text) > 3000 else "")
-    send(chat_id, f"📦 Release preview\n\nRepository: {REPO}\nTag: {tag}\n"
-                   f"Target branch: {BRANCH}\nType: Stable (not a prerelease)\n\n"
-                   f"Changelog:\n\n{preview}\n\nPublish this release?",
+    # Reuse the existing bot message to keep the Telegram conversation tidy.
+    preview = text[:2800] + ("…" if len(text) > 2800 else "")
+    edit(chat_id, session["message_id"],
+         f"📦 Release preview\n\nRepository: {REPO}\nTag: {tag}\n"
+         f"Target branch: {BRANCH}\nType: Stable\n\n"
+         f"Changelog:\n\n{preview}\n\nPublish this release?",
          confirm_keyboard())
+
 
 
 def handle_callback(query):
@@ -323,7 +327,8 @@ def handle_callback(query):
     except Exception as exc:
         print(f"Callback failed: {exc}", flush=True)
         try:
-            send(chat_id, f"❌ Release failed: {exc}\nNo success is reported unless GitHub confirms it.",
+            edit(chat_id, message_id,
+                 f"❌ Release failed: {exc}\nNo success is reported unless GitHub confirms it.",
                  home_keyboard())
         except Exception:
             pass
