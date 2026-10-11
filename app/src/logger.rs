@@ -18,12 +18,17 @@ pub const WARN_SYMBOL: &str = "✧";
 pub const ERROR_SYMBOL: &str = "❂";
 
 fn log_path() -> PathBuf {
-    // Use a stable per-user location instead of the process working directory.
-    // GUI launches, shortcuts, and relaunches can all have different CWDs.
-    dirs::data_local_dir()
-        .unwrap_or_else(std::env::temp_dir)
-        .join("Antumbra")
-        .join("logs")
+    // Anchor the log beside the executable so it is easy to find regardless
+    // of whether Antumbra was launched from a shortcut, terminal, or GUI.
+    if let Ok(executable) = std::env::current_exe() {
+        if let Some(directory) = executable.parent() {
+            return directory.join(LOG_FILE_NAME);
+        }
+    }
+
+    // Fallback only if the executable path cannot be resolved.
+    std::env::current_dir()
+        .unwrap_or_else(|_| std::env::temp_dir())
         .join(LOG_FILE_NAME)
 }
 
