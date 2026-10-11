@@ -8,7 +8,7 @@ use ratatui::crossterm::event::{KeyCode, KeyEvent};
 use ratatui::layout::{Alignment, Constraint, Layout};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Paragraph, Widget};
+use ratatui::widgets::{Block, Borders, Paragraph, Widget};
 
 use crate::app::{AppCtx, AppPage};
 use crate::components::layout::{MainLayout, RectExt};
@@ -85,7 +85,7 @@ impl Page for WelcomePage {
                     Constraint::Length(1),
                     Constraint::Length(9), // Menu
                     Constraint::Length(1),
-                    Constraint::Length(3), // Device support and bundled files
+                    Constraint::Length(4), // Device support, bundled files, and WinUSB component
                     Constraint::Fill(1),
                 ])
                 .areas(content_area);
@@ -106,6 +106,19 @@ impl Page for WelcomePage {
                     Line::from(vec![
                         Span::styled("Recovery: ", ctx.theme.style_muted()),
                         Span::styled("Bundled DA + Auth", Style::default().fg(ctx.theme.success)),
+                    ]),
+                    Line::from(vec![
+                        Span::styled("Driver status: ", ctx.theme.style_muted()),
+                        Span::styled(
+                            if cfg!(target_os = "windows") && std::path::Path::new(r"C:\Windows\System32\drivers\WinUSB.sys").exists() {
+                                "WinUSB component AVAILABLE"
+                            } else if cfg!(target_os = "windows") {
+                                "WinUSB component NOT FOUND"
+                            } else {
+                                "Windows-only check"
+                            },
+                            Style::default().fg(if cfg!(target_os = "windows") && std::path::Path::new(r"C:\Windows\System32\drivers\WinUSB.sys").exists() { ctx.theme.success } else { ctx.theme.warning }),
+                        ),
                     ]),
                 ])
                 .alignment(Alignment::Center);
