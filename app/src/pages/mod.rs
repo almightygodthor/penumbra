@@ -3,9 +3,11 @@
     SPDX-FileCopyrightText: 2025-2026 Shomy
 */
 pub mod device;
+pub mod drivers;
 pub mod options;
 pub mod welcome;
 pub use device::DevicePage;
+pub use drivers::DriversPage;
 pub use options::OptionsPage;
 use ratatui::Frame;
 use ratatui::crossterm::event::KeyEvent;
