@@ -578,6 +578,7 @@ impl FlashScatter {
         log::info!("Direct-write plan: {} partition(s), {} image bytes.", to_write.len(), total_bytes);
         io.status(format!("Writing {} selected partitions...", to_write.len()));
 
+        let total_partitions = to_write.len();
         let mut completed = Vec::new();
         for (item, partition, path, reader, size, sparse) in &mut to_write {
             log::info!(
@@ -604,7 +605,7 @@ impl FlashScatter {
                 "[WRITE OK] {} — direct WritePartition returned success ({} decoded bytes submitted)",
                 item.name, size
             );
-            io.status(format!("Written {}/{}: {}", completed.len(), to_write.len(), item.name));
+            io.status(format!("Written {}/{}: {}", completed.len(), total_partitions, item.name));
         }
 
         log::info!("========== SCATTER FLASH REPORT ==========");
