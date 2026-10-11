@@ -28,6 +28,7 @@ CONTINUATION_TOKEN = os.environ.get("RELEASE_BOT_GITHUB_TOKEN", "")
 REPO = os.environ.get("RELEASE_REPOSITORY", "almightygodthor/penumbra")
 BRANCH = os.environ.get("RELEASE_BRANCH", "main")
 WORKFLOW_FILE = "stable-release-bot.yml"
+RELEASE_WORKFLOW_FILE = "antumbra-stable-release.yml"
 TG_API = f"https://api.telegram.org/bot{TG_TOKEN}"
 GH_API = "https://api.github.com"
 WORKER_SECONDS = 5 * 60 * 60 + 35 * 60
@@ -143,32 +144,40 @@ def next_stable_tag():
 def publish_release(chat_id, message_id, changelog):
     if not changelog.strip():
         raise APIError("Changelog cannot be empty.")
+    if not CONTINUATION_TOKEN:
+        raise APIError(
+            "RELEASE_BOT_GITHUB_TOKEN is required to dispatch the build workflow. "
+            "Give it Actions: write permission for this repository."
+        )
     tag = next_stable_tag()
 
-    # Recheck immediately before publishing to reduce accidental duplicate tags.
+    # Refuse an existing tag before queuing any builds.
     try:
         gh("GET", f"/repos/{REPO}/git/ref/tags/{urllib.parse.quote(tag, safe='')}")
-        raise APIError(f"Tag {tag} already exists. No release was created.")
+        raise APIError(f"Tag {tag} already exists. No build was queued.")
     except APIError as exc:
         if "HTTP 404" not in str(exc):
             raise
 
-    release = gh("POST", f"/repos/{REPO}/releases", {
-        "tag_name": tag,
-        "target_commitish": BRANCH,
-        "name": f"Penumbra {tag}",
-        "body": changelog.strip(),
-        "draft": False,
-        "prerelease": False,
-        "make_latest": "true",
-    })
+    # Build workflow compiles both binaries first and creates the release only
+    # after both jobs succeed. Pass the exact Telegram changelog as an input.
+    gh("POST", f"/repos/{REPO}/actions/workflows/{RELEASE_WORKFLOW_FILE}/dispatches", {
+        "ref": BRANCH,
+        "inputs": {
+            "release_tag": tag,
+            "changelog": changelog.strip(),
+        },
+    }, token=CONTINUATION_TOKEN)
     SESSIONS.pop(str(chat_id), None)
-    url = release.get("html_url", f"https://github.com/{REPO}/releases/tag/{tag}")
+    url = f"https://github.com/{REPO}/actions/workflows/{RELEASE_WORKFLOW_FILE}"
     edit(chat_id, message_id,
-         f"✅ Stable release published\n\n{release.get('name', tag)}\n{url}",
-         [[{"text": "🔗 Open GitHub Release", "url": url}],
+         f"🏗️ Build queued for stable release {tag}\n\n"
+         "Antumbra is being built for Linux and Windows. The GitHub release will be "
+         "created only if both builds succeed; the direct executable files will be attached.\n\n"
+         f"Track progress: {url}",
+         [[{"text": "🔎 View Build Workflow", "url": url}],
           [{"text": "🚀 Start Another Release", "callback_data": "release:start"}]])
-    print(f"Published {REPO} {tag}: {url}", flush=True)
+    print(f"Queued Antumbra stable build for {REPO} {tag}", flush=True)
 
 
 def start_release(chat_id, message_id):
