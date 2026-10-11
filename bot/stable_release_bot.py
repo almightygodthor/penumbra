@@ -16,6 +16,9 @@ import json
 import os
 import re
 import time
+import threading
+import zipfile
+import io
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -159,26 +162,66 @@ def publish_release(chat_id, message_id, changelog):
         if "HTTP 404" not in str(exc):
             raise
 
-    # Build workflow compiles both binaries first and creates the release only
-    # after both jobs succeed. Pass the exact Telegram changelog as an input.
+    # Build both binaries before creating the GitHub release.
+    started_at = time.time()
     gh("POST", f"/repos/{REPO}/actions/workflows/{RELEASE_WORKFLOW_FILE}/dispatches", {
         "ref": BRANCH,
-        "inputs": {
-            "release_tag": tag,
-            "changelog": changelog.strip(),
-        },
+        "inputs": {"release_tag": tag, "changelog": changelog.strip()},
     }, token=CONTINUATION_TOKEN)
-    SESSIONS.pop(str(chat_id), None)
+    SESSIONS[str(chat_id)] = {"state": "building", "changelog": changelog.strip(), "tag": tag}
     url = f"https://github.com/{REPO}/actions/workflows/{RELEASE_WORKFLOW_FILE}"
-    edit(chat_id, message_id,
-         f"🏗️ Build queued for stable release {tag}\n\n"
-         "Antumbra is being built for Linux and Windows. The GitHub release will be "
-         "created only if both builds succeed; the direct executable files will be attached.\n\n"
-         f"Track progress: {url}",
-         [[{"text": "🔎 View Build Workflow", "url": url}],
-          [{"text": "🚀 Start Another Release", "callback_data": "release:start"}]])
+    edit(chat_id, message_id, f"🏗️ Build queued for stable release {tag}\n{progress_bar(0)}\nWaiting for Linux and Windows runners…",
+         [[{"text": "🔎 View Build Workflow", "url": url}]])
+    threading.Thread(target=monitor_build, args=(chat_id, message_id, tag, started_at, changelog.strip()), daemon=True).start()
     print(f"Queued Antumbra stable build for {REPO} {tag}", flush=True)
 
+
+def monitor_build(chat_id, message_id, tag, started_at, changelog):
+    chat_key = str(chat_id)
+    run = None
+    try:
+        deadline = time.time() + 3600
+        while time.time() < deadline:
+            if run is None:
+                data = gh('GET', f'/repos/{REPO}/actions/workflows/{RELEASE_WORKFLOW_FILE}/runs?branch={urllib.parse.quote(BRANCH)}&event=workflow_dispatch&per_page=10')
+                candidates = []
+                for item in data.get('workflow_runs', []):
+                    try: created = time.mktime(time.strptime(item.get('created_at', ''), '%Y-%m-%dT%H:%M:%SZ'))
+                    except Exception: continue
+                    if created >= started_at - 10: candidates.append(item)
+                if candidates: run = max(candidates, key=lambda x: x.get('id', 0))
+                else: time.sleep(8); continue
+            jobs = gh('GET', f'/repos/{REPO}/actions/runs/{run["id"]}/jobs?per_page=100').get('jobs', [])
+            steps = [step for job in jobs for step in job.get('steps', [])]
+            done = sum(1 for step in steps if step.get('status') == 'completed')
+            pct = int(100 * done / len(steps)) if steps else 0
+            active = ', '.join(job.get('name', 'Build') for job in jobs if job.get('status') == 'in_progress') or 'Waiting for runners'
+            run = gh('GET', f'/repos/{REPO}/actions/runs/{run["id"]}')
+            if run.get('status') == 'completed':
+                if run.get('conclusion') == 'success':
+                    url = f'https://github.com/{REPO}/releases/tag/{urllib.parse.quote(tag, safe="")}'
+                    edit(chat_id, message_id, f'✅ Stable release {tag} published!\n{progress_bar(100)}\n{url}', [[{'text':'📦 Open Release','url':url},{'text':'🚀 Start Another Release','callback_data':'release:start'}]])
+                    SESSIONS.pop(chat_key, None); return
+                failed = [job for job in jobs if job.get('conclusion') in ('failure','timed_out','cancelled','action_required')]
+                report = f'❌ Build failed for {tag}\n{progress_bar(pct)}\n'
+                for job in failed[:2]:
+                    report += f'\nFailed job: {job.get("name")}\n'
+                    try:
+                        req = urllib.request.Request(f'{GH_API}/repos/{REPO}/actions/jobs/{job["id"]}/logs', headers={'Authorization':f'Bearer {GH_TOKEN}','Accept':'application/vnd.github+json','User-Agent':'Penumbra-Stable-Release-Bot'})
+                        with urllib.request.urlopen(req, timeout=25) as response: raw = response.read()
+                        with zipfile.ZipFile(io.BytesIO(raw)) as zf:
+                            logs = '\n'.join(zf.read(n).decode('utf-8', errors='replace') for n in zf.namelist() if n.endswith('.txt'))
+                        report += logs[-1200:] + '\n'
+                    except Exception as exc: report += f'Could not fetch logs: {exc}\n'
+                SESSIONS[chat_key] = {'state':'failed','changelog':changelog,'tag':tag,'message_id':message_id}
+                edit(chat_id, message_id, report[:3900], [[{'text':'🔁 Retry same changelog','callback_data':'release:retry'}],[{'text':'✏️ Edit changelog','callback_data':'release:edit_failed'}],[{'text':'✖ Cancel','callback_data':'release:cancel'}]])
+                return
+            edit(chat_id, message_id, f'🏗️ Building Antumbra {tag}\n{progress_bar(pct)}\n\n{run.get("status")} — {active}', [[{'text':'🔎 View Build Workflow','url':run.get('html_url',f'https://github.com/{REPO}/actions')} ]])
+            time.sleep(15)
+    except Exception as exc:
+        print(f'Build monitor error: {exc}', flush=True)
+        try: edit(chat_id, message_id, f'⚠️ Build monitoring error: {str(exc)[:500]}\nCheck GitHub Actions for the actual result.', [[{'text':'🔎 View Build Workflow','url':f'https://github.com/{REPO}/actions/workflows/{RELEASE_WORKFLOW_FILE}'}]])
+        except Exception: pass
 
 def start_release(chat_id, message_id):
     SESSIONS[str(chat_id)] = {"state": "changelog", "message_id": message_id, "changelog": ""}
