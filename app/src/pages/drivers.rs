@@ -154,7 +154,7 @@ $result = foreach ($d in $devices) {
             // Zadig needs administrator privileges to install or replace a USB driver.
             // Use ShellExecute's "runas" verb via PowerShell so Windows displays the
             // normal UAC consent prompt instead of returning ERROR_ELEVATION_REQUIRED.
-            let escaped_path = path.to_string_lossy().replace(''', "''");
+            let escaped_path = path.to_string_lossy().replace('\'', "''");
             let command = format!("Start-Process -FilePath '{escaped_path}' -Verb RunAs");
             match Command::new("powershell.exe")
                 .args([
