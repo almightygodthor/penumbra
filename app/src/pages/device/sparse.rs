@@ -142,7 +142,7 @@ impl Read for SparseReader {
             let active = std::mem::replace(&mut self.active, ActiveChunk::None);
             match active {
                 ActiveChunk::Raw(mut remaining) => {
-                    let amount = buf.len().min(remaining.min(self.output_remaining) as usize);
+                    let amount = remaining.min(self.output_remaining).min(buf.len() as u64) as usize;
                     if amount == 0 {
                         continue;
                     }
@@ -158,7 +158,7 @@ impl Read for SparseReader {
                     return Ok(count);
                 }
                 ActiveChunk::Fill { pattern, mut offset, mut remaining } => {
-                    let amount = buf.len().min(remaining.min(self.output_remaining) as usize);
+                    let amount = remaining.min(self.output_remaining).min(buf.len() as u64) as usize;
                     if amount == 0 {
                         continue;
                     }
@@ -174,7 +174,7 @@ impl Read for SparseReader {
                     return Ok(amount);
                 }
                 ActiveChunk::Zero(mut remaining) => {
-                    let amount = buf.len().min(remaining.min(self.output_remaining) as usize);
+                    let amount = remaining.min(self.output_remaining).min(buf.len() as u64) as usize;
                     if amount == 0 {
                         continue;
                     }
