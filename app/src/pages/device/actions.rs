@@ -4,7 +4,7 @@
 */
 
 use std::fs::File;
-use std::io::{BufReader, BufWriter, Read};
+use std::io::{BufReader, BufWriter};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, Sender};
 
@@ -12,6 +12,7 @@ use penumbra::activity::DeviceActivity;
 use penumbra::port::PortType;
 use penumbra::{Device, Partition};
 
+use super::sparse::ImageReader;
 use super::worker::{DeviceCommand, DeviceEvent, ScatterReviewItem};
 use crate::components::ActivityExt;
 
@@ -534,7 +535,7 @@ impl FlashScatter {
         // action. The DA's FlashUpdate scatter flow can return aggregate success without
         // proving that each requested image was transferred to its intended partition.
         let available: Vec<Partition> = dev.partitions_iter().collect();
-        let mut to_write: Vec<(ScatterReviewItem, Partition, PathBuf, u64)> = Vec::new();
+        let mut to_write: Vec<(ScatterReviewItem, Partition, PathBuf, ImageReader, u64, bool)> = Vec::new();
 
         for item in items.iter().filter(|item| {
             item.downloadable && item.found && selected_names.contains(item.name.as_str())
@@ -548,35 +549,27 @@ impl FlashScatter {
                     item.name
                 ))?;
             let path = scatter_display_path(&item.filename, &scatter_dir);
-            let size = std::fs::metadata(&path)?.len();
-            if size == 0 {
-                anyhow::bail!("Selected image for '{}' is empty: {}", item.name, path.display());
-            }
-            if size > partition.size {
-                anyhow::bail!(
-                    "Image for '{}' is too large ({} bytes; partition size {} bytes): {}",
-                    item.name, size, partition.size, path.display()
+            // Validate the complete image before any partition is written. Android sparse
+            // images are expanded in memory as a stream; no giant temporary userdata.img is made.
+            let (reader, size, sparse) = ImageReader::open(&path, partition.size)
+                .map_err(|error| anyhow::anyhow!("Cannot prepare image for '{}': {error:#}", item.name))?;
+            if sparse {
+                log::info!(
+                    "Android sparse image detected for '{}': compressed={} bytes, expanded={} bytes",
+                    item.name,
+                    std::fs::metadata(&path)?.len(),
+                    size
                 );
+                io.status(format!("Sparse image detected: {} (expanded while flashing)", item.name));
             }
-
-            // XML DA WritePartition accepts raw images. Reject Android sparse images
-            // rather than silently treating their container bytes as a raw partition image.
-            let mut probe = File::open(&path)?;
-            let mut magic = [0u8; 4];
-            if probe.read_exact(&mut magic).is_ok() && magic == [0x3a, 0xff, 0x26, 0xed] {
-                anyhow::bail!(
-                    "Image for '{}' is Android sparse. This direct-write path requires a raw image: {}",
-                    item.name, path.display()
-                );
-            }
-            to_write.push((item.clone(), partition, path, size));
+            to_write.push((item.clone(), partition, path, reader, size, sparse));
         }
 
         if to_write.is_empty() {
             anyhow::bail!("No valid, selected scatter images are available to write.");
         }
 
-        let total_bytes: u64 = to_write.iter().map(|(_, _, _, size)| *size).sum();
+        let total_bytes: u64 = to_write.iter().map(|(_, _, _, _, size, _)| *size).sum();
         let mut bytes_done = 0u64;
         io.progress_start(total_bytes, "Writing selected scatter partitions...");
         let reporter = io.progress_reporter();
@@ -586,20 +579,18 @@ impl FlashScatter {
         io.status(format!("Writing {} selected partitions...", to_write.len()));
 
         let mut completed = Vec::new();
-        for (item, partition, path, size) in &to_write {
+        for (item, partition, path, reader, size, sparse) in &mut to_write {
             log::info!(
-                "Writing scatter entry '{}' via WritePartition: image='{}', partition_size=0x{:X}, image_size=0x{:X}",
-                item.name, path.display(), partition.size, size
+                "Writing scatter entry '{}' via WritePartition: image='{}', partition_size=0x{:X}, expanded_image_size=0x{:X}, sparse={}",
+                item.name, path.display(), partition.size, size, sparse
             );
             io.status(format!("Writing {}...", item.name));
 
-            let file = File::open(path)?;
-            let mut reader = BufReader::new(file);
             let name = item.name.clone();
             let progress = reporter.clone();
             let base = bytes_done;
 
-            if let Err(error) = dev.write_partition(&partition.name, *size, &mut reader, move |written, _total| {
+            if let Err(error) = dev.write_partition(&partition.name, *size, reader, move |written, _total| {
                 progress.update(base + written, Some(format!("Writing '{}'...", name)));
             }) {
                 log::error!("Scatter direct write failed for '{}': {error:#}", item.name);
@@ -610,7 +601,7 @@ impl FlashScatter {
             bytes_done += *size;
             completed.push(item.name.clone());
             log::info!(
-                "[WRITE OK] {} — direct WritePartition returned success ({} bytes submitted)",
+                "[WRITE OK] {} — direct WritePartition returned success ({} decoded bytes submitted)",
                 item.name, size
             );
             io.status(format!("Written {}/{}: {}", completed.len(), to_write.len(), item.name));
