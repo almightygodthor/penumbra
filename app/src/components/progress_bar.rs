@@ -104,6 +104,33 @@ impl ProgressBar {
             if elapsed > 0.0 { self.written_bytes as f64 / elapsed } else { 0.0 }
         })
     }
+
+    fn eta(&self) -> Option<Duration> {
+        let speed = self.speed();
+        if speed <= 0.0 || self.written_bytes == 0 || self.written_bytes >= self.total_bytes {
+            return None;
+        }
+
+        let remaining = self.total_bytes - self.written_bytes;
+        let seconds = (remaining as f64 / speed).ceil();
+        if !seconds.is_finite() || seconds > u64::MAX as f64 {
+            return None;
+        }
+
+        Some(Duration::from_secs(seconds as u64))
+    }
+
+    fn format_eta(eta: Duration) -> String {
+        let seconds = eta.as_secs();
+        let hours = seconds / 3600;
+        let minutes = (seconds % 3600) / 60;
+        let seconds = seconds % 60;
+        if hours > 0 {
+            format!("ETA {hours}:{minutes:02}:{seconds:02}")
+        } else {
+            format!("ETA {minutes:02}:{seconds:02}")
+        }
+    }
 }
 
 impl Component for ProgressBar {
@@ -156,7 +183,8 @@ impl Component for ProgressBar {
                 let total = human_bytes(self.total_bytes as f64);
                 let speed = human_bytes(self.speed());
 
-                let stats = format!("{written} / {total}  •  {speed}/s");
+                let eta = self.eta().map_or_else(|| "ETA --:--".to_string(), Self::format_eta);
+                let stats = format!("{written} / {total}  •  {speed}/s  •  {eta}");
                 let stats_width = stats.chars().count() as u16;
 
                 let [msg_area, stats_area] =
