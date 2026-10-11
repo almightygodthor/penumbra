@@ -649,7 +649,26 @@ impl DevicePage {
         // Scatter preflight is local-only: show the selected scatter's image list even
         // while the device is disconnected instead of the normal connection placeholder.
         if self.scatter_review_mode {
-            self.partition_list.render(inner, frame.buffer_mut(), &ctx.theme);
+            // Keep the shortcut legend inside the review panel so users discover
+            // bulk selection without having to know the key bindings in advance.
+            let [list_area, help_area] =
+                Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).areas(inner);
+            self.partition_list.render(list_area, frame.buffer_mut(), &ctx.theme);
+            let help = Paragraph::new(Line::from(vec![
+                Span::styled("[A]", Style::default().fg(ctx.theme.accent).add_modifier(Modifier::BOLD)),
+                Span::raw(" Select all  "),
+                Span::styled("[D]", Style::default().fg(ctx.theme.accent).add_modifier(Modifier::BOLD)),
+                Span::raw(" Deselect all  "),
+                Span::styled("[Space]", Style::default().fg(ctx.theme.accent).add_modifier(Modifier::BOLD)),
+                Span::raw(" Toggle  "),
+                Span::styled("[Enter]", Style::default().fg(ctx.theme.accent).add_modifier(Modifier::BOLD)),
+                Span::raw(" Flash  "),
+                Span::styled("[Esc]", Style::default().fg(ctx.theme.accent).add_modifier(Modifier::BOLD)),
+                Span::raw(" Cancel"),
+            ]))
+            .style(Style::default().fg(ctx.theme.muted))
+            .alignment(Alignment::Center);
+            frame.render_widget(help, help_area);
             return;
         }
 
