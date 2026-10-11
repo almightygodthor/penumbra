@@ -31,7 +31,7 @@ jobs:
       - uses: giraffate/clippy-action@94e9bd8deab2618756ec5380f12eb35bcb0a88ca
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          clippy_flags: -p penumbra --all-targets -- -D warnings -W clippy::nursery
+          clippy_flags: -p penumbra-mtk --all-targets -- -D warnings -W clippy::nursery
           reporter: ${{ github.event_name == 'pull_request' && 'github-pr-review' || 'github-check' }}
           fail_on_error: true
 
