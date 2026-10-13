@@ -382,7 +382,7 @@ impl DevicePage {
                 KeyCode::Char('b') | KeyCode::Char('B') => self.slot_target = Some(BootPartition::B),
                 KeyCode::Char('r') | KeyCode::Char('R') => { self.busy = true; self.send(DeviceCommand::RefreshActiveSlot); }
                 KeyCode::Enter => {
-                    let Some(slot) = self.slot_target else { return };
+                    let Some(slot) = self.slot_target.clone() else { return };
                     if self.active_slot.as_deref() == Some(match slot { BootPartition::A => "A", BootPartition::B => "B" }) {
                         self.header_status = Some("That slot is already active.".into());
                         return;
@@ -717,7 +717,7 @@ impl DevicePage {
 
         if self.slot_mode {
             let current = self.active_slot.as_deref().unwrap_or("Unknown");
-            let target = self.slot_target.map(|slot| match slot { BootPartition::A => "A", BootPartition::B => "B" }).unwrap_or("Not selected");
+            let target = self.slot_target.as_ref().map(|slot| match slot { BootPartition::A => "A", BootPartition::B => "B" }).unwrap_or("Not selected");
             let lines = vec![
                 Line::from(""),
                 Line::from(vec![Span::styled("Current active slot: ", Style::default().fg(ctx.theme.text)), Span::styled(current, Style::default().fg(ctx.theme.warning).add_modifier(Modifier::BOLD))]),
