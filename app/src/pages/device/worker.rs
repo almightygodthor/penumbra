@@ -9,7 +9,7 @@ use std::thread;
 use std::time::Duration;
 
 use penumbra::activity::{Activity, DeviceActivity};
-use penumbra::hacc::{Da, Preloader, TryRead};
+use penumbra::hacc::{BootControl, BootPartition, Da, OFFSET_SLOT_SUFFIX, Preloader, TryRead, TryWrite};
 use penumbra::port::{ConnectionType, PortBackend, PortType};
 use penumbra::{DevInfoData, Device, DeviceBuilder, Partition};
 
@@ -52,6 +52,8 @@ pub struct ScatterReviewItem {
 
 pub enum DeviceCommand {
     RunAction(usize),
+    RefreshActiveSlot,
+    SetActiveSlot(BootPartition),
     FlashPreparedScatter { scatter: PathBuf, selected_names: Vec<String> },
     PartitionsChosen(Vec<String>),
     FileChosen(PathBuf),
@@ -63,6 +65,7 @@ pub enum DeviceEvent {
     StatusChanged(DeviceStatus),
     Connected { devinfo: DevInfoData, partitions: Vec<Partition> },
     PartitionsChanged(Vec<Partition>),
+    ActiveSlotChanged(Result<String, String>),
 
     NeedPartitions,
     NeedScatterFiles(Vec<ScatterReviewItem>),
@@ -194,6 +197,7 @@ fn run_worker(
     let _ = event_tx.send(DeviceEvent::StatusChanged(DeviceStatus::Connected(conn_type)));
 
     let registry = actions();
+    let _ = event_tx.send(DeviceEvent::ActiveSlotChanged(read_active_slot(&mut dev)));
 
     loop {
         let cmd = match cmd_rx.recv_timeout(ConnectParams::PROBE_TIME) {
@@ -212,6 +216,24 @@ fn run_worker(
         };
 
         match cmd {
+            DeviceCommand::RefreshActiveSlot => {
+                let _ = event_tx.send(DeviceEvent::ActiveSlotChanged(read_active_slot(&mut dev)));
+                let _ = event_tx.send(DeviceEvent::ActionFinished);
+            }
+            DeviceCommand::SetActiveSlot(slot) => {
+                let result = set_active_slot(&mut dev, slot).and_then(|_| read_active_slot(&mut dev));
+                match result {
+                    Ok(slot) => {
+                        let _ = event_tx.send(DeviceEvent::ActiveSlotChanged(Ok(slot.clone())));
+                        let _ = event_tx.send(DeviceEvent::HeaderStatus(format!("Active slot verified: {slot}")));
+                    }
+                    Err(error) => {
+                        let _ = event_tx.send(DeviceEvent::ActiveSlotChanged(Err(error.clone())));
+                        let _ = event_tx.send(DeviceEvent::Error(error));
+                    }
+                }
+                let _ = event_tx.send(DeviceEvent::ActionFinished);
+            }
             DeviceCommand::RunAction(idx) => {
                 let Some(action) = registry.get(idx) else {
                     let _ = event_tx.send(DeviceEvent::Error("Unknown action".into()));
@@ -322,4 +344,29 @@ fn run_worker(
             _ => {}
         }
     }
+}
+
+
+fn read_active_slot(dev: &mut Device<'_, PortType>) -> Result<String, String> {
+    dev.get_bootctrl()
+        .map(|bootctrl| match bootctrl.get_active_slot() {
+            BootPartition::A => "A".to_string(),
+            BootPartition::B => "B".to_string(),
+        })
+        .map_err(|error| format!("Unable to read boot-control metadata: {error}"))
+}
+
+fn set_active_slot(dev: &mut Device<'_, PortType>, slot: BootPartition) -> Result<(), String> {
+    let mut bootctrl = dev.get_bootctrl().map_err(|error| format!("Unable to read boot-control metadata: {error}"))?;
+    if bootctrl.get_active_slot() == slot {
+        return Ok(());
+    }
+
+    bootctrl.set_active_slot(slot);
+    let mut data = [0u8; OFFSET_SLOT_SUFFIX + size_of::<BootControl>()];
+    bootctrl.try_write(&mut data[OFFSET_SLOT_SUFFIX..])
+        .map_err(|error| format!("Unable to serialize boot-control metadata: {error}"))?;
+    dev.write_partition("misc", data.len() as u64, &data[..], |_, _| {})
+        .map_err(|error| format!("Failed to write boot-control metadata to misc: {error}"))?;
+    Ok(())
 }
