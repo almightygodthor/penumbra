@@ -9,6 +9,7 @@ use std::sync::mpsc::{Receiver, Sender, TryRecvError};
 
 use human_bytes::human_bytes;
 use penumbra::activity::Activity;
+use penumbra::hacc::BootPartition;
 use penumbra::port::ConnectionType;
 use penumbra::{DevInfoData, Partition};
 use ratatui::Frame;
@@ -80,6 +81,9 @@ pub struct DevicePage {
     scatter_items: Vec<ScatterReviewItem>,
     scatter_path: Option<PathBuf>,
     pending_scatter: Option<(PathBuf, Vec<String>)>,
+    slot_mode: bool,
+    active_slot: Option<String>,
+    slot_target: Option<BootPartition>,
 }
 
 impl DevicePage {
@@ -95,9 +99,9 @@ impl DevicePage {
         let menu_items = action_labels
             .iter()
             .map(|a| ListItemEntryBuilder::default().label(a.label().into()).build().unwrap())
-            .chain(std::iter::once(
-                ListItemEntryBuilder::default().label("Back to Menu".into()).build().unwrap(),
-            ))
+            .chain(["Change Active Slot", "Back to Menu"].into_iter().map(|label| {
+                ListItemEntryBuilder::default().label(label.into()).build().unwrap()
+            }))
             .collect();
 
         let menu = SelectableListBuilder::default()
@@ -136,6 +140,9 @@ impl DevicePage {
             scatter_items: Vec::new(),
             scatter_path: None,
             pending_scatter: None,
+            slot_mode: false,
+            active_slot: None,
+            slot_target: None,
         }
     }
 
@@ -211,6 +218,13 @@ impl DevicePage {
                         self.header_status = Some("Device connected; starting scatter flash...".into());
                         self.busy = true;
                         self.send(DeviceCommand::FlashPreparedScatter { scatter, selected_names });
+                    }
+                }
+
+                DeviceEvent::ActiveSlotChanged(result) => {
+                    match result {
+                        Ok(slot) => { self.active_slot = Some(slot); self.header_status = None; }
+                        Err(error) => { self.active_slot = None; self.header_status = Some(error); }
                     }
                 }
 
@@ -361,6 +375,27 @@ impl DevicePage {
     }
 
     fn handle_menu_input(&mut self, ctx: &mut AppCtx, key: KeyEvent) {
+        if self.slot_mode {
+            match key.code {
+                KeyCode::Esc => { self.slot_mode = false; self.slot_target = None; self.header_status = None; }
+                KeyCode::Char('a') | KeyCode::Char('A') => self.slot_target = Some(BootPartition::A),
+                KeyCode::Char('b') | KeyCode::Char('B') => self.slot_target = Some(BootPartition::B),
+                KeyCode::Char('r') | KeyCode::Char('R') => { self.busy = true; self.send(DeviceCommand::RefreshActiveSlot); }
+                KeyCode::Enter => {
+                    let Some(slot) = self.slot_target else { return };
+                    if self.active_slot.as_deref() == Some(match slot { BootPartition::A => "A", BootPartition::B => "B" }) {
+                        self.header_status = Some("That slot is already active.".into());
+                        return;
+                    }
+                    self.busy = true;
+                    self.header_status = Some("Writing boot-control metadata...".into());
+                    self.send(DeviceCommand::SetActiveSlot(slot));
+                }
+                _ => {}
+            }
+            return;
+        }
+
         match key.code {
             KeyCode::Up | KeyCode::PageUp => self.menu.previous(),
             KeyCode::Down | KeyCode::PageDown => self.menu.next(),
@@ -369,6 +404,14 @@ impl DevicePage {
                 let total_actions = actions().len();
 
                 if idx == total_actions {
+                    self.slot_mode = true;
+                    self.slot_target = None;
+                    self.active_slot = None;
+                    self.send(DeviceCommand::RefreshActiveSlot);
+                    self.busy = true;
+                    return;
+                }
+                if idx == total_actions + 1 {
                     ctx.change_page(AppPage::Welcome);
                     return;
                 }
@@ -672,6 +715,25 @@ impl DevicePage {
             return;
         }
 
+        if self.slot_mode {
+            let current = self.active_slot.as_deref().unwrap_or("Unknown");
+            let target = self.slot_target.map(|slot| match slot { BootPartition::A => "A", BootPartition::B => "B" }).unwrap_or("Not selected");
+            let lines = vec![
+                Line::from(""),
+                Line::from(vec![Span::styled("Current active slot: ", Style::default().fg(ctx.theme.text)), Span::styled(current, Style::default().fg(ctx.theme.warning).add_modifier(Modifier::BOLD))]),
+                Line::from(""),
+                Line::from(vec![Span::styled("[A]", Style::default().fg(ctx.theme.accent).add_modifier(Modifier::BOLD)), Span::raw(" Select slot A    "), Span::styled("[B]", Style::default().fg(ctx.theme.accent).add_modifier(Modifier::BOLD)), Span::raw(" Select slot B")]),
+                Line::from(vec![Span::styled("Selected target: ", Style::default().fg(ctx.theme.text)), Span::styled(target, Style::default().fg(ctx.theme.info).add_modifier(Modifier::BOLD))]),
+                Line::from(""),
+                Line::from(vec![Span::styled("[Enter]", Style::default().fg(ctx.theme.accent).add_modifier(Modifier::BOLD)), Span::raw(" Apply and verify    "), Span::styled("[R]", Style::default().fg(ctx.theme.accent).add_modifier(Modifier::BOLD)), Span::raw(" Refresh    "), Span::styled("[Esc]", Style::default().fg(ctx.theme.accent).add_modifier(Modifier::BOLD)), Span::raw(" Back")]),
+                Line::from(""),
+                Line::from(Span::styled("Slot changes update boot-control metadata in misc via DA.", Style::default().fg(ctx.theme.muted))),
+                Line::from(Span::styled("Ensure the target slot contains a bootable system before switching.", Style::default().fg(ctx.theme.warning))),
+            ];
+            frame.render_widget(Paragraph::new(lines).alignment(Alignment::Center), inner);
+            return;
+        }
+
         if !matches!(self.status, DeviceStatus::Connected(_)) {
             let message = Paragraph::new(vec![
                 Line::from(""),
@@ -739,6 +801,8 @@ impl DevicePage {
             "[↑/↓] Navigate • [Enter] Select • [Esc] Cancel"
         } else if matches!(self.focused, FocusedPanel::PartitionMenu) {
             "[↑/↓] Navigate • [Space] Toggle • [Enter] Confirm • [Esc] Cancel"
+        } else if self.slot_mode {
+            "[A/B] Select slot • [Enter] Apply • [R] Refresh • [Esc] Back"
         } else if self.busy {
             "Operation in progress..."
         } else {
