@@ -153,6 +153,12 @@ where
 {
     debug!("Starting download to partition '{}' with size {:#X}", part_name, size);
 
+    // Partition writes may spend several seconds erasing/preparing the target before
+    // the DA asks the host to upload data. The default 1s transport timeout can expire
+    // during that phase, including for small images such as boot/vendor_boot. Keep the
+    // longer I/O timeout for the complete command/transfer/ack sequence.
+    port.set_timeout(MAX_TIMEOUT)?;
+
     xmlcmd!(xml, port, WritePartition, part_name, part_name)?;
 
     loop {
