@@ -407,32 +407,59 @@ impl Xml {
 
         let mut chunk = vec![0u8; packet_length];
         let mut bytes_sent = 0u64;
+        let mut packet_index = 0u64;
 
         port.set_timeout(timeout)?;
+        info!(
+            "[DA DOWNLOAD] Starting transfer: total={} bytes, packet_length={} bytes, timeout={}ms",
+            size,
+            packet_length,
+            timeout.as_millis()
+        );
 
         let result = 'download: {
             while bytes_sent < size {
+                packet_index += 1;
                 let to_read = (size - bytes_sent).min(packet_length as u64) as usize;
                 if let Err(e) = reader.read_exact_fill(&mut chunk[..to_read]) {
-                    break 'download Err(e.into());
+                    break 'download Err(crate::error::PenumbraError::from(e).context(format!(
+                        "reading source data for packet {} at offset {:#X}", packet_index, bytes_sent
+                    )));
                 }
 
-                // Status
                 if let Err(e) = self.ack(port, Some(0)) {
-                    break 'download Err(e);
+                    break 'download Err(e.context(format!(
+                        "sending ready/status ACK for packet {} at offset {:#X}", packet_index, bytes_sent
+                    )));
                 }
                 if let Err(e) = self.read_ack(port) {
-                    break 'download Err(e);
+                    break 'download Err(e.context(format!(
+                        "waiting for ready/status ACK for packet {} at offset {:#X}", packet_index, bytes_sent
+                    )));
                 }
 
                 if let Err(e) = self.send(port, &chunk[..to_read]) {
-                    break 'download Err(e);
+                    break 'download Err(e.context(format!(
+                        "sending image packet {} ({} bytes) at offset {:#X}", packet_index, to_read, bytes_sent
+                    )));
                 }
                 if let Err(e) = self.read_ack(port) {
-                    break 'download Err(e);
+                    break 'download Err(e.context(format!(
+                        "waiting for device ACK after packet {} ({} bytes sent before this packet, offset {:#X})", packet_index, bytes_sent, bytes_sent
+                    )));
                 }
 
                 bytes_sent += to_read as u64;
+                if bytes_sent == size || bytes_sent % (1024 * 1024) < to_read as u64 {
+                    info!(
+                        "[DA DOWNLOAD] Progress: {}/{} bytes ({:.1}%), packet {}/{}",
+                        bytes_sent,
+                        size,
+                        bytes_sent as f64 * 100.0 / size.max(1) as f64,
+                        packet_index,
+                        size.div_ceil(packet_length as u64)
+                    );
+                }
                 progress(bytes_sent, size);
             }
 
@@ -440,7 +467,16 @@ impl Xml {
         };
 
         port.set_timeout(MIN_TIMEOUT)?;
-        result?;
+        if let Err(error) = result {
+            log::error!(
+                "[DA DOWNLOAD FAILED] after {}/{} bytes ({:.1}%), packet {}: {error:#}",
+                bytes_sent,
+                size,
+                bytes_sent as f64 * 100.0 / size.max(1) as f64,
+                packet_index
+            );
+            return Err(error);
+        }
 
         debug!("File download completed, 0x{:X} bytes sent.", size);
 
