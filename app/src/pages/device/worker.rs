@@ -240,6 +240,11 @@ fn run_worker(
                     continue;
                 };
 
+                let action_name = action.label();
+                let action_started = std::time::Instant::now();
+                log::info!("========== ACTION START: {} ==========", action_name);
+                log::info!("[ACTION] DA session active; known partitions: {}", partitions.len());
+
                 let result = {
                     let io = DeviceIo::new(&event_tx, &cmd_rx, &partitions, &activity);
                     action.run(&mut dev, &io)
@@ -247,6 +252,7 @@ fn run_worker(
 
                 match result {
                     Err(e) => {
+                        log::error!("[ACTION FAILED] {} after {:.2}s: {e:#}", action_name, action_started.elapsed().as_secs_f64());
                         let reboot_action = action.label().starts_with("Reboot to ");
                         let lost = !params.device_present();
                         let _ = event_tx.send(DeviceEvent::Error(if reboot_action {
@@ -262,6 +268,7 @@ fn run_worker(
                         }
                     }
                     Ok(true) if action.changes_layout() => {
+                        log::info!("[ACTION OK] {} completed in {:.2}s; refreshing DA partition state.", action_name, action_started.elapsed().as_secs_f64());
                         // Rebuild the DA protocol state after a successful partition write/erase.
                         // Large writes can leave the current session stale even while USB remains visible.
                         let devinfo = dev.devinfo().data();
@@ -285,12 +292,17 @@ fn run_worker(
                         }
                     }
                     Ok(_) if action.label().starts_with("Reboot to ") => {
-                        log::info!("{} command accepted; ending the current DA session.", action.label());
+                        log::info!("[ACTION OK] {} accepted in {:.2}s; ending the current DA session.", action_name, action_started.elapsed().as_secs_f64());
                         let _ = event_tx.send(DeviceEvent::StatusChanged(DeviceStatus::Disconnected));
                         let _ = event_tx.send(DeviceEvent::ActionFinished);
                         break;
                     }
-                    Ok(_) => {}
+                    Ok(false) => {
+                        log::info!("[ACTION CANCELLED] {} after {:.2}s.", action_name, action_started.elapsed().as_secs_f64());
+                    }
+                    Ok(true) => {
+                        log::info!("[ACTION OK] {} completed in {:.2}s.", action_name, action_started.elapsed().as_secs_f64());
+                    }
                 }
 
                 let _ = event_tx.send(DeviceEvent::ActionFinished);
