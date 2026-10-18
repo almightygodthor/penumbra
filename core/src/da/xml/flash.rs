@@ -159,11 +159,18 @@ where
     // longer I/O timeout for the complete command/transfer/ack sequence.
     port.set_timeout(MAX_TIMEOUT)?;
 
+    log::info!(
+        "[DA WRITE] partition='{}': sending WritePartition command (I/O timeout={}ms)",
+        part_name,
+        MAX_TIMEOUT.as_millis()
+    );
     xmlcmd!(xml, port, WritePartition, part_name, part_name)?;
+    log::info!("[DA WRITE] partition='{}': command accepted; waiting for DA requests", part_name);
 
     loop {
         let resp = xml.read_data(port)?;
         if memmem::find(&resp, CMD_END).is_some() {
+            log::info!("[DA WRITE] partition='{}': received CMD_END; acknowledging final result", part_name);
             xml.ack(port, None)?;
 
             let resp = String::from_utf8_lossy(&resp);
@@ -171,9 +178,11 @@ where
 
             if result != "OK" {
                 let err_msg = get_tag::<String>(&resp, "arg/message").unwrap_or_default();
+                log::error!("[DA WRITE] partition='{}': DA returned result='{}', message='{}'", part_name, result, err_msg);
                 return Err(XmlErrorKind::Other(err_msg).into());
             }
 
+            log::info!("[DA WRITE] partition='{}': DA reported success", part_name);
             break;
         }
 
@@ -191,6 +200,7 @@ where
                 xml.process_file_sys_op(port, &resp, op)?;
             }
             CMD_DOWNLOAD_FILE => {
+                log::info!("[DA WRITE] partition='{}': DA requested image data ({} bytes)", part_name, size);
                 // Large dynamic partitions and userdata can take much longer for
                 // the DA to process than ordinary partitions. Keep this longer
                 // timeout scoped to these known large partitions.
