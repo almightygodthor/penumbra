@@ -223,15 +223,33 @@ impl DeviceAction for WritePartition {
         let reporter = io.progress_reporter();
 
         for (partition, path, size) in &to_write {
-            let file = File::open(path)?;
+            let started = std::time::Instant::now();
+            log::info!(
+                "[WRITE START] partition='{}' image='{}' image_bytes={} (0x{:X}) partition_bytes={} (0x{:X})",
+                partition.name, path.display(), size, size, partition.size, partition.size
+            );
+            let file = File::open(path).map_err(|error| {
+                log::error!("[WRITE FAILED] partition='{}' opening image '{}': {error:#}", partition.name, path.display());
+                error
+            })?;
             let mut reader = BufReader::new(file);
             let name = partition.name.clone();
             let reporter = reporter.clone();
 
-            dev.write_partition(&partition.name, *size, &mut reader, move |written, _total| {
+            if let Err(error) = dev.write_partition(&partition.name, *size, &mut reader, move |written, _total| {
                 reporter.update(bytes_done + written, Some(format!("Flashing '{name}'...")));
-            })?;
+            }) {
+                log::error!(
+                    "[WRITE FAILED] partition='{}' image='{}' elapsed={:.2}s error={error:#}",
+                    partition.name, path.display(), started.elapsed().as_secs_f64()
+                );
+                return Err(error.into());
+            }
 
+            log::info!(
+                "[WRITE OK] partition='{}' image='{}' bytes={} elapsed={:.2}s (DA command returned success; no read-back verification)",
+                partition.name, path.display(), size, started.elapsed().as_secs_f64()
+            );
             bytes_done += size;
         }
 
