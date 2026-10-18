@@ -243,7 +243,8 @@ def monitor_build(chat_id, message_id, tag, started_at, changelog):
             if run.get('status') == 'completed':
                 if run.get('conclusion') == 'success':
                     url = f'https://github.com/{REPO}/releases/tag/{urllib.parse.quote(tag, safe="")}'
-                    edit(chat_id, message_id, f'✅ Stable release {tag} published!\n{progress_bar(100)}\n{url}', [[{'text':'📦 Open Release','url':url},{'text':'🚀 Start Another Release','callback_data':'release:start'}]])
+                    preview = changelog.strip()[:2800] + ("…\n(Full changelog is available in the GitHub release.)" if len(changelog.strip()) > 2800 else "")
+                    edit(chat_id, message_id, f'✅ Stable release {tag} published!\n{progress_bar(100)}\n{url}\n\n📝 Changelog\n\n{preview}', [[{'text':'📦 Open Release','url':url},{'text':'🚀 Start Another Release','callback_data':'release:start'}]])
                     SESSIONS.pop(chat_key, None); return
                 failed = [job for job in jobs if job.get('conclusion') in ('failure','timed_out','cancelled','action_required')]
                 report = f'❌ Build failed for {tag}\n{progress_bar(pct)}\n'
