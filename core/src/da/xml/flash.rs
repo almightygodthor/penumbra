@@ -221,11 +221,11 @@ where
                     &mut progress,
                 )?;
 
-                if needs_extended_timeout {
-                    // process_download_data restores the minimum timeout after
-                    // transfer; the DA may still need time before its next response.
-                    port.set_timeout(MAX_TIMEOUT)?;
-                }
+                // process_download_data restores MIN_TIMEOUT after the data transfer.
+                // WritePartition still has to finish its storage operation and send
+                // CMD_END; waiting with the 1-second minimum timeout causes a false
+                // timeout immediately after large images finish transferring.
+                port.set_timeout(MAX_TIMEOUT)?;
             }
             _ => return Err(XmlErrorKind::UnsupportedCmd.into()),
         }
