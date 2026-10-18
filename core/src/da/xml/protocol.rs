@@ -422,31 +422,26 @@ impl Xml {
                 packet_index += 1;
                 let to_read = (size - bytes_sent).min(packet_length as u64) as usize;
                 if let Err(e) = reader.read_exact_fill(&mut chunk[..to_read]) {
-                    break 'download Err(crate::error::PenumbraError::from(e).context(format!(
-                        "reading source data for packet {} at offset {:#X}", packet_index, bytes_sent
-                    )));
+                    log::error!("[DA DOWNLOAD FAILED] reading source data for packet {} at offset {:#X}: {e}", packet_index, bytes_sent);
+                    break 'download Err(e.into());
                 }
 
                 if let Err(e) = self.ack(port, Some(0)) {
-                    break 'download Err(e.context(format!(
-                        "sending ready/status ACK for packet {} at offset {:#X}", packet_index, bytes_sent
-                    )));
+                    log::error!("[DA DOWNLOAD FAILED] sending ready/status ACK for packet {} at offset {:#X}: {e:#}", packet_index, bytes_sent);
+                    break 'download Err(e);
                 }
                 if let Err(e) = self.read_ack(port) {
-                    break 'download Err(e.context(format!(
-                        "waiting for ready/status ACK for packet {} at offset {:#X}", packet_index, bytes_sent
-                    )));
+                    log::error!("[DA DOWNLOAD FAILED] waiting for ready/status ACK for packet {} at offset {:#X}: {e:#}", packet_index, bytes_sent);
+                    break 'download Err(e);
                 }
 
                 if let Err(e) = self.send(port, &chunk[..to_read]) {
-                    break 'download Err(e.context(format!(
-                        "sending image packet {} ({} bytes) at offset {:#X}", packet_index, to_read, bytes_sent
-                    )));
+                    log::error!("[DA DOWNLOAD FAILED] sending image packet {} ({} bytes) at offset {:#X}: {e:#}", packet_index, to_read, bytes_sent);
+                    break 'download Err(e);
                 }
                 if let Err(e) = self.read_ack(port) {
-                    break 'download Err(e.context(format!(
-                        "waiting for device ACK after packet {} ({} bytes sent before this packet, offset {:#X})", packet_index, bytes_sent, bytes_sent
-                    )));
+                    log::error!("[DA DOWNLOAD FAILED] waiting for device ACK after packet {} ({} bytes sent before this packet, offset {:#X}): {e:#}", packet_index, bytes_sent, bytes_sent);
+                    break 'download Err(e);
                 }
 
                 bytes_sent += to_read as u64;
